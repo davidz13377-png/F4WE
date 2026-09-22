@@ -1,0 +1,19 @@
+FROM node:20-bookworm-slim
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/bot/package.json apps/bot/package.json
+COPY apps/mobile/package.json apps/mobile/package.json
+COPY patches patches
+RUN npm ci --include=dev
+
+COPY apps/api apps/api
+RUN npm --workspace @music-box/api run db:generate \
+  && npm --workspace @music-box/api run build \
+  && chown -R node:node /app
+
+USER node
+CMD ["sh", "-c", "npm --workspace @music-box/api run db:deploy && npm --workspace @music-box/api run start"]

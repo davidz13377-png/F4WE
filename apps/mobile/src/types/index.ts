@@ -1,0 +1,9 @@
+export type Rank = "Access" | "Moderator" | "Admin" | "Developer";
+export type User = { id: string; username: string; rank: Rank; isOwner?: boolean; profilePicture?: string | null; registrationDate?: string };
+export type Song = { id: string; title: string; artist?: string | null; artworkUrl?: string | null; duration?: number | null; streamUrl: string; liked?: boolean };
+export type RotationSong = Song & { playCount: number };
+export type Playlist = { id: string; name: string; description?: string | null; artworkUrl?: string | null; creatorId: string; creator: User; isPublic: boolean; saved: boolean; trackCount: number };
+export type PlaylistDetails = Playlist & { songs: Song[] };
+export type HistoryEntry = { kind: "song"; musicId: string; at: number };
+export type ReviewItem = { id: string; status: "Pending" | "Processing" | "Accepted" | "Rejected" | "Fixed"; requestDate?: string; reportDate?: string; songsRequested?: string; sourceUrl?: string | null; requestedTitle?: string | null; requestedArtist?: string | null; importedMusicId?: string | null; description?: string; rejectionReason?: string | null; adminResponse?: string | null; user?: User };
+export type UpdateIdea = { id: string; content: string; createdDate: string; userId: string; user?: User };

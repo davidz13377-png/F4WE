@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "F4WE",
+    "slug": "f4we",
+    "scheme": "musicbox",
+    "version": "1.0.0",
+    "icon": "./assets/F4WE-icon.png",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": { "UIBackgroundModes": ["audio"] }
+    },
+    "android": {
+      "package": "com.musicbox.app",
+      "icon": "./assets/F4WE-icon.png",
+      "adaptiveIcon": { "foregroundImage": "./assets/F4WE-adaptive.png", "backgroundColor": "#000000" },
+      "permissions": ["FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MEDIA_PLAYBACK", "POST_NOTIFICATIONS"]
+    },
+    "plugins": ["expo-router", "expo-secure-store", "expo-document-picker", "./plugins/withF4WEAndroid"],
+    "experiments": { "typedRoutes": true },
+    "extra": { "apiUrl": "http://10.0.2.2:4000" }
+  }
+}

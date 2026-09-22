@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Rank {
+  Access
+  Moderator
+  Admin
+  Developer
+}
+
+enum ReviewStatus {
+  Pending
+  Processing
+  Accepted
+  Rejected
+  Fixed
+}
+
+model User {
+  id                String             @id @db.Char(16)
+  username          String             @unique @db.VarChar(32)
+  passwordHash      String
+  rank              Rank               @default(Access)
+  isOwner           Boolean            @default(false)
+  profilePicture    String?
+  registrationDate DateTime            @default(now())
+  accessKeyUsed     String             @db.VarChar(64)
+  accessKey         AccessKey           @relation(fields: [accessKeyUsed], references: [key])
+  uploadedMusic     Music[]             @relation("Uploader")
+  albums            Album[]
+  favorites         Favorite[]
+  musicPlays        MusicPlay[]
+  savedAlbums       SavedAlbum[]
+  musicRequests     MusicRequest[]
+  bugReports        BugReport[]
+  updateIdeas       UpdateIdea[]
+  updatePosts       UpdatePost[]
+  notifications     Notification[]
+  rankChanges       UserRanksHistory[]  @relation("ChangedUser")
+  rankChangesMade   UserRanksHistory[]  @relation("ChangedBy")
+}
+
+model AccessKey {
+  key                String   @id @db.VarChar(64)
+  used               Boolean  @default(false)
+  usageLimit         Int      @default(1)
+  usedCount          Int      @default(0)
+  createdByDiscordId String
+  createdDate        DateTime @default(now())
+  usedDate           DateTime?
+  users              User[]
+}
+
+model Music {
+  id          String      @id @default(cuid())
+  title       String
+  artist      String?
+  filePath    String
+  mimeType    String      @default("audio/mpeg")
+  duration    Int?
+  artworkUrl  String?
+  uploaderId  String?     @db.Char(16)
+  uploadDate  DateTime    @default(now())
+  uploader    User?       @relation("Uploader", fields: [uploaderId], references: [id], onDelete: SetNull)
+  albums      AlbumSong[]
+  favorites   Favorite[]
+  plays       MusicPlay[]
+}
+
+model MusicPlay {
+  id       String   @id @default(cuid())
+  userId   String   @db.Char(16)
+  musicId  String
+  playedAt DateTime @default(now())
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  music    Music    @relation(fields: [musicId], references: [id], onDelete: Cascade)
+
+  @@index([userId, playedAt])
+  @@index([musicId, playedAt])
+}
+
+model Album {
+  id           String       @id @default(cuid())
+  name         String
+  description  String?
+  artworkUrl   String?
+  creatorId    String       @db.Char(16)
+  creationDate DateTime     @default(now())
+  isPublic     Boolean      @default(false)
+  creator      User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  songs        AlbumSong[]
+  savedBy      SavedAlbum[]
+}
+
+model AlbumSong {
+  albumId String
+  musicId String
+  order   Int      @default(0)
+  album   Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  music   Music    @relation(fields: [musicId], references: [id], onDelete: Cascade)
+  @@id([albumId, musicId])
+}
+
+model Favorite {
+  userId    String   @db.Char(16)
+  musicId   String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  music     Music    @relation(fields: [musicId], references: [id], onDelete: Cascade)
+  @@id([userId, musicId])
+}
+
+model SavedAlbum {
+  userId    String   @db.Char(16)
+  albumId   String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  album     Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  @@id([userId, albumId])
+}
+
+model MusicRequest {
+  id              String       @id @default(cuid())
+  userId          String       @db.Char(16)
+  songsRequested  String
+  sourceUrl       String?
+  requestedTitle  String?
+  requestedArtist String?
+  importStartedAt DateTime?
+  importedMusicId String?
+  status          ReviewStatus @default(Pending)
+  rejectionReason String?
+  requestDate     DateTime     @default(now())
+  processedDate   DateTime?
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model BugReport {
+  id            String       @id @default(cuid())
+  userId        String       @db.Char(16)
+  description   String
+  status        ReviewStatus @default(Pending)
+  adminResponse String?
+  reportDate    DateTime     @default(now())
+  resolvedDate  DateTime?
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UpdatePost {
+  id          String   @id @default(cuid())
+  developerId String   @db.Char(16)
+  content     String
+  postedDate  DateTime @default(now())
+  editedDate  DateTime?
+  developer   User     @relation(fields: [developerId], references: [id], onDelete: Cascade)
+}
+
+model UpdateIdea {
+  id          String   @id @default(cuid())
+  userId      String   @db.Char(16)
+  content     String
+  createdDate DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String   @db.Char(16)
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserRanksHistory {
+  id         String   @id @default(cuid())
+  userId     String   @db.Char(16)
+  oldRank    Rank
+  newRank    Rank
+  changedBy  String?  @db.Char(16)
+  actorLabel String?
+  changeDate DateTime @default(now())
+  user       User     @relation("ChangedUser", fields: [userId], references: [id], onDelete: Cascade)
+  actor      User?    @relation("ChangedBy", fields: [changedBy], references: [id], onDelete: SetNull)
+}
+
+model LogEvent {
+  id          String   @id @default(cuid())
+  type        String
+  userId      String?
+  actionType  String
+  details     Json
+  createdAt   DateTime @default(now())
+  deliveredAt DateTime?
+  attempts    Int      @default(0)
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

@@ -1,0 +1,40 @@
+{
+  "name": "music-box",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "preinstall": "npm-force-resolutions",
+    "postinstall": "patch-package",
+    "dev:api": "npm --workspace @music-box/api run dev",
+    "dev:bot": "npm --workspace @music-box/bot run dev",
+    "dev:mobile": "npm --workspace @music-box/mobile run start",
+    "db:generate": "npm --workspace @music-box/api run db:generate",
+    "db:migrate": "npm --workspace @music-box/api run db:migrate",
+    "db:deploy": "npm --workspace @music-box/api run db:deploy",
+    "migrate:media:r2": "tsx scripts/f4we-migrate-media-to-r2.ts",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.2"
+    },
+    "xcode": {
+      "uuid": "11.1.1"
+    }
+  },
+  "resolutions": {
+    "deepmerge-ts": "8.0.2",
+    "uuid": "11.1.1"
+  },
+  "devDependencies": {
+    "npm-force-resolutions": "^0.0.10",
+    "patch-package": "^8.0.1"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

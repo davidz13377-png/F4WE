@@ -1,0 +1,16 @@
+node_modules
+**/node_modules
+**/.expo
+**/android/.gradle
+**/android/app/build
+**/android/build
+**/.cxx
+.git
+.env
+**/.env
+uploads
+**/uploads
+dist
+**/dist
+*.zip
+*.log

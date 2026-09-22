@@ -1,0 +1,58 @@
+# Titkos környezeti változók
+.env
+**/.env
+.env.local
+**/.env.local
+.env.production
+**/.env.production
+
+# A példafájlokat megtartjuk
+!.env.example
+!**/.env.example
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# F4WE automatikus biztonsági mentések
+.f4we-backups/
+
+# Expo
+.expo/
+**/.expo/
+
+# Android cache és build
+**/android/.gradle/
+**/android/build/
+**/android/app/build/
+**/android/app/.cxx/
+**/android/.cxx/
+
+# API helyi feltöltések
+uploads/*
+**/uploads/*
+!uploads/.gitkeep
+!**/uploads/.gitkeep
+
+# Build eredmények
+dist/
+**/dist/
+build/
+**/build/
+
+# Logok és ideiglenes fájlok
+*.log
+*.tmp
+*.bak
+*.f4we-backup-*
+
+# Helyileg telepített programok
+tools/
+
+# Korábbi szöveges kódmásolatok
+*.txt
+
+# Android aláíró kulcsok
+*.keystore
+*.jks
+*.p12
