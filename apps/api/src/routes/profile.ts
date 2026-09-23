@@ -8,11 +8,13 @@ import { authenticate, requireRank, signToken } from "../middleware/auth.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { audit } from "../services/logging.js";
 import { notifyUser } from "../services/realtime.js";
-import { deleteImage, saveImage } from "../services/storage.js";
+import { beginDirectUpload, completeDirectUpload, deleteImage, saveImage } from "../services/storage.js";
 import { canonicalSpotifyTrackUrl, spotifyTrackMetadata } from "../services/spotify.js";
 
 const router = Router();
 const pictureUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+const directUploadRequest = z.object({ mimeType: z.string().min(1).max(100), size: z.number().int().positive().optional() }).strict();
+const directUploadCompletion = z.object({ uploadToken: z.string().min(1).max(5000) }).strict();
 router.use(authenticate);
 
 router.get("/staff-team", asyncRoute(async (_req, res) => {
@@ -30,6 +32,25 @@ router.patch("/me", asyncRoute(async (req, res) => {
   const input = z.object({ profilePicture: z.string().url().nullable() }).parse(req.body);
   const user = await prisma.user.update({ where: { id: req.auth!.userId }, data: input, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true } });
   res.json(user);
+}));
+
+router.post("/me/picture/upload-url", asyncRoute(async (req, res) => {
+  const input = directUploadRequest.parse(req.body);
+  res.json(await beginDirectUpload("profile", req.auth!.userId, input.mimeType, input.size));
+}));
+
+router.post("/me/picture/complete", asyncRoute(async (req, res) => {
+  const { uploadToken } = directUploadCompletion.parse(req.body);
+  const current = await prisma.user.findUniqueOrThrow({ where: { id: req.auth!.userId }, select: { profilePicture: true } });
+  const uploaded = await completeDirectUpload("profile", req.auth!.userId, uploadToken);
+  try {
+    await prisma.user.update({ where: { id: req.auth!.userId }, data: { profilePicture: uploaded.url } });
+  } catch (error) {
+    await deleteImage(uploaded.url, "profile");
+    throw error;
+  }
+  await deleteImage(current.profilePicture, "profile");
+  res.json({ profilePicture: uploaded.url });
 }));
 
 router.post("/me/picture", pictureUpload.single("file"), asyncRoute(async (req, res) => {

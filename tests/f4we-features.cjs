@@ -5,7 +5,7 @@ const root = path.resolve(__dirname, "..");
 function load(file, mocks = {}) {
   const module = { exports: {} };
   const js = ts.transpileModule(fs.readFileSync(path.join(root, file), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-  vm.runInNewContext(js, { module, exports: module.exports, require: name => name in mocks ? mocks[name] : name.endsWith("/F4WEAlert") ? { F4WEAlert: { alert() {} } } : require(name), console, URL, Date, Math, Number, Promise, FormData, Blob, setTimeout, clearTimeout, Object, Set, Map });
+  vm.runInNewContext(js, { module, exports: module.exports, require: name => name in mocks ? mocks[name] : name.endsWith("/F4WEAlert") ? { F4WEAlert: { alert() {} } } : require(name), console, process, URL, Date, Math, Number, Promise, FormData, Blob, setTimeout, clearTimeout, Object, Set, Map });
   return module.exports;
 }
 const owner = { id: "1111111111111111", username: "owner", rank: "Access" }, other = { id: "2222222222222222", username: "other", rank: "Access" };
@@ -48,6 +48,7 @@ const db = {
   music: {
     findUnique: async ({ where }) => songs.find(s => s.id === where.id) || null,
     findMany: async ({ where }) => songs.filter(s => !where.id || where.id.in.includes(s.id)).map(s => ({ ...s, favorites: favorites.filter(f => f.musicId === s.id && f.userId === actor.id) })),
+    create: async ({ data }) => { const song = { id: "s" + ++sequence, uploadDate: new Date(), mimeType: "audio/mpeg", ...data }; songs.push(song); return song; },
     delete: async ({ where }) => { const index = songs.findIndex(s => s.id === where.id); const [s] = songs.splice(index, 1); links = links.filter(l => l.musicId !== where.id); favorites = favorites.filter(f => f.musicId !== where.id); return s; },
     update: async ({ where, data }) => { const s = songs.find(s => s.id === where.id); Object.assign(s, data); return { ...s, favorites: favorites.filter(f => f.musicId === s.id && f.userId === actor.id) }; }
   },
@@ -86,6 +87,18 @@ const errors = load("apps/api/src/middleware/errors.ts", { "../services/logging.
 const catalog = load("apps/api/src/services/catalog.ts", { "../env.js": { env } });
 let detector = async () => null;
 const storageMock = {
+  beginDirectUpload: async (category, userId, contentType, size) => {
+    const valid = category === "music" ? contentType === "audio/mpeg" : ["image/jpeg", "image/png", "image/webp"].includes(contentType);
+    if (!valid) throw Object.assign(new Error(category === "music" ? "Only valid MP3 files are accepted" : "Use a JPG, PNG, or WebP image"), { status: 415 });
+    if (size && size > (category === "music" ? env.MAX_MP3_MB : 5) * 1024 * 1024) throw Object.assign(new Error("The selected file is too large"), { status: 413 });
+    return { uploadUrl: `https://r2.test/${category}/direct`, uploadToken: `direct:${category}:${userId}`, contentType, expiresIn: 600 };
+  },
+  completeDirectUpload: async (category, userId, token) => {
+    if (token !== `direct:${category}:${userId}`) throw Object.assign(new Error("The upload session is invalid or expired. Choose the file again."), { status: 400 });
+    return category === "music"
+      ? { key: "music/direct.mp3", reference: "r2://music/direct.mp3", mimeType: "audio/mpeg", size: 123 }
+      : { key: `${category}/direct.png`, url: `${env.PUBLIC_API_URL}/media/${category}/direct.png`, mimeType: "image/png", size: 68 };
+  },
   saveImage: async (category, buffer, extension) => {
     const directory = path.resolve(env.UPLOAD_DIR, category); fs.mkdirSync(directory, { recursive: true });
     const filename = `test-${Date.now()}-${Math.random().toString(16).slice(2)}.${extension}`;
@@ -166,6 +179,11 @@ async function main() {
     actor = { ...owner, rank: "Moderator" };
     assert.equal((await request("PATCH", "/api/music/s1", { title: "Moderator edit", artist: "Artist" })).status, 200);
     assert.equal((await request("POST", "/api/music/upload", { title: "Allowed role" })).status, 400);
+    const musicUploadSetup = await request("POST", "/api/music/upload/upload-url", { mimeType: "audio/mpeg", size: 123 });
+    assert.equal(musicUploadSetup.status, 200); assert.equal(musicUploadSetup.body.uploadUrl, "https://r2.test/music/direct");
+    const directSong = await request("POST", "/api/music/upload/complete", { uploadToken: musicUploadSetup.body.uploadToken, title: "Direct song", artist: "Artist" });
+    assert.equal(directSong.status, 201); assert.equal(directSong.body.filePath, "r2://music/direct.mp3");
+    assert.equal((await request("POST", "/api/music/upload/upload-url", { mimeType: "image/png", size: 123 })).status, 415);
     const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
     const artworkForm = new FormData(); artworkForm.append("file", new Blob([png], { type: "image/png" }), "song.png");
     const artworkResponse = await fetch(base + "/api/music/s1/picture", { method: "POST", headers: { Authorization: "Bearer mock" }, body: artworkForm });
@@ -175,6 +193,10 @@ async function main() {
     assert.equal((await request("DELETE", "/api/music/s1/picture")).status, 204);
     assert.equal((await request("DELETE", "/api/music/s1")).status, 403);
     actor = owner;
+    const directPhotoSetup = await request("POST", "/api/profile/me/picture/upload-url", { mimeType: "image/png", size: 68 });
+    assert.equal(directPhotoSetup.status, 200);
+    const directPhoto = await request("POST", "/api/profile/me/picture/complete", { uploadToken: directPhotoSetup.body.uploadToken });
+    assert.equal(directPhoto.status, 200); assert.ok(directPhoto.body.profilePicture.includes("/media/profile/"));
     const photoForm = new FormData(); photoForm.append("file", new Blob([png], { type: "image/png" }), "avatar.png");
     const photoResponse = await fetch(base + "/api/profile/me/picture", { method: "POST", headers: { Authorization: "Bearer mock" }, body: photoForm });
     assert.equal(photoResponse.status, 200); const photo = await photoResponse.json(); assert.ok(photo.profilePicture.includes("/media/profile/"));
@@ -183,6 +205,9 @@ async function main() {
     assert.equal((await fetch(base + "/api/profile/me/picture", { method: "POST", headers: { Authorization: "Bearer mock" }, body: badForm })).status, 415);
     assert.equal((await request("POST", "/api/playlists", { name: " " })).status, 400);
     const created = await request("POST", "/api/playlists", { name: "Evening mix", isPublic: true }); assert.equal(created.status, 201); const id = created.body.id;
+    const directPlaylistSetup = await request("POST", `/api/playlists/${id}/picture/upload-url`, { mimeType: "image/webp", size: 68 });
+    assert.equal(directPlaylistSetup.status, 200);
+    assert.equal((await request("POST", `/api/playlists/${id}/picture/complete`, { uploadToken: directPlaylistSetup.body.uploadToken })).status, 200);
     const playlistPhoto = new FormData(); playlistPhoto.append("file", new Blob([png], { type: "image/png" }), "cover.png");
     const playlistPhotoResponse = await fetch(base + `/api/playlists/${id}/picture`, { method: "POST", headers: { Authorization: "Bearer mock" }, body: playlistPhoto });
     assert.equal(playlistPhotoResponse.status, 200); assert.ok((await playlistPhotoResponse.json()).artworkUrl.includes("/media/playlist/"));
@@ -272,22 +297,36 @@ async function main() {
   assert.equal(media.profilePictureUrl("http://localhost:4000/media/profile/avatar.png"), "http://10.0.2.2:4000/media/profile/avatar.png");
   assert.equal(media.profilePictureUrl("/media/profile/avatar.png"), "http://10.0.2.2:4000/media/profile/avatar.png");
   assert.equal(media.profilePictureUrl("https://cdn.example.org/photo.jpg"), "https://cdn.example.org/photo.jpg");
-  const { File: NodeFile } = require("node:buffer");
+  const uploadCalls = []; let nativeUpload;
+  const mobileApi = load("apps/mobile/src/lib/api.ts", {
+    "expo-constants": { expoConfig: { extra: { apiUrl: "https://api.test" } } },
+    "expo/fetch": { fetch: async (url, options) => {
+      uploadCalls.push({ url, options });
+      if (url.endsWith("/upload-url")) return { status: 200, json: async () => ({ uploadUrl: "https://r2.test/signed", uploadToken: "upload-token", contentType: "audio/mpeg", expiresIn: 600 }) };
+      if (url.endsWith("/complete")) return { status: 201, json: async () => ({ id: "direct-song" }) };
+      throw new Error("Unexpected API URL " + url);
+    } },
+    "expo-file-system": { File: class { constructor(uri) { this.uri = uri; } async upload(url, options) { nativeUpload = { uri: this.uri, url, options }; return { status: 200, body: "" }; } }, UploadType: { BINARY_CONTENT: 0, MULTIPART: 1 } }
+  });
+  mobileApi.setApiToken("session-token");
+  const uploadedSong = await mobileApi.uploadFile("/api/music/upload", { uri: "file:///cache/song.mp3", name: "song.mp3", type: "audio/mp3", size: 1234 }, { title: "Song" });
+  assert.equal(uploadedSong.id, "direct-song"); assert.equal(uploadCalls.length, 2);
+  assert.equal(uploadCalls[0].url, "https://api.test/api/music/upload/upload-url"); assert.equal(uploadCalls[0].options.headers.Authorization, "Bearer session-token");
+  assert.equal(JSON.parse(uploadCalls[0].options.body).size, 1234); assert.equal(nativeUpload.url, "https://r2.test/signed");
+  assert.equal(nativeUpload.options.httpMethod, "PUT"); assert.equal(nativeUpload.options.headers["Content-Type"], "audio/mpeg"); assert.ok(!nativeUpload.options.headers.Authorization);
+  assert.deepEqual(JSON.parse(uploadCalls[1].options.body), { uploadToken: "upload-token", title: "Song" });
+  console.log("PASS: mobile obtains a signed URL, uploads bytes straight to R2, then completes through the authenticated API.");
   let permission = true, oversized = false, uploads = 0, refreshed = 0, permissionCalls = 0; const alerts = [], platform = { OS: "android" };
-  class PhotoFile extends NodeFile {
-    constructor(uri) { assert.equal(uri, "file:///cache/avatar.png"); super([Buffer.from([1, 2, 3])], "avatar.png", { type: "image/png" }); }
-    get size() { return oversized ? 6 * 1024 * 1024 : super.size; }
-  }
   const profile = load("apps/mobile/app/(tabs)/profile.tsx", {
     react: { useState: value => [value, () => {}], useRef: value => ({ current: value }) }, "react/jsx-runtime": { jsx, jsxs: jsx },
     "@expo/vector-icons": { Ionicons: "Icon" }, "expo-clipboard": { setStringAsync: async () => {} }, "expo-router": { router: {} },
-    "expo-image-picker": { requestMediaLibraryPermissionsAsync: async () => { permissionCalls++; return { granted: permission }; }, launchImageLibraryAsync: async () => ({ canceled: false, assets: [{ uri: "file:///cache/avatar.png" }] }) },
-    "expo-file-system": { File: PhotoFile }, "react-native": { Platform: platform, ActivityIndicator: "Spinner", Alert: { alert: (...args) => alerts.push(args) }, Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { create: s => s } },
+    "expo-image-picker": { requestMediaLibraryPermissionsAsync: async () => { permissionCalls++; return { granted: permission }; }, launchImageLibraryAsync: async () => ({ canceled: false, assets: [{ uri: "file:///cache/avatar.png", fileName: "avatar.png", mimeType: "image/png", fileSize: oversized ? 6 * 1024 * 1024 : 3 }] }) },
+    "react-native": { Platform: platform, ActivityIndicator: "Spinner", Alert: { alert: (...args) => alerts.push(args) }, Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { create: s => s } },
     "../../src/components/F4WEAlert": { F4WEAlert: { alert: (...args) => alerts.push(args) } },
     "../../src/components/UI": { Button: "Button", Card: "Card", RankBadge: "Badge", OwnerBadge: "OwnerBadge", Screen: "Screen", Title: "Title", ui: {} },
     "../../src/context/AuthContext": { useAuth: () => ({ user: owner, refresh: async () => refreshed++, logout: async () => {} }) },
     "../../src/lib/theme": { colors: {} }, "../../src/lib/media": media,
-    "../../src/lib/api": { uploadForm: async (route, form) => { assert.equal(route, "/api/profile/me/picture"); assert.ok(form.get("file") instanceof NodeFile); assert.equal(form.get("file").type, "image/png"); uploads++; } }
+    "../../src/lib/api": { uploadFile: async (route, file) => { assert.equal(route, "/api/profile/me/picture"); assert.equal(file.uri, "file:///cache/avatar.png"); assert.equal(file.name, "avatar.png"); assert.equal(file.type, "image/png"); assert.equal(file.size, 3); uploads++; } }
   });
   function find(node, predicate) {
     if (!node) return undefined;
@@ -299,6 +338,6 @@ async function main() {
   await clickPhoto(); assert.equal(uploads, 1); assert.equal(refreshed, 1); assert.equal(alerts.length, 0); assert.equal(permissionCalls, 0);
   platform.OS = "ios"; permission = false; await clickPhoto(); assert.equal(uploads, 1); assert.equal(permissionCalls, 1); assert.equal(alerts.at(-1)[0], "Photo permission needed");
   permission = true; oversized = true; await clickPhoto(); assert.equal(uploads, 1); assert.ok(alerts.at(-1)[1].includes("5 MB"));
-  console.log("PASS: profile sends a real File instead of URI object; permission/size handling; server picture URLs use the device-reachable API host.");
+  console.log("PASS: profile passes a direct-R2 upload descriptor; permission/size handling; server picture URLs use the device-reachable API host.");
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

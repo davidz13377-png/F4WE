@@ -195,6 +195,8 @@ Utána zárd be ezt a PowerShell ablakot, hogy az ideiglenes secret változók e
 
 ## 8. Online ellenőrzőlista
 
+Az aktuális mobil kliens a fájlt közvetlenül az R2-be tölti egy rövid életű, az API által aláírt URL-lel. Emiatt előbb mindig az új `f4we-api` verziót deployold, és csak utána teszteld vagy buildeld az új mobil klienst. Új Railway-változó nem szükséges; a meglévő R2-változók és `JWT_SECRET` kellenek.
+
 - `/health` 200 választ ad.
 - A Railway API logban nincs Prisma migration hiba.
 - A Railway Bot logban megjelenik a ready üzenet.

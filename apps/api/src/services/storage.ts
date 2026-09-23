@@ -1,4 +1,7 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { fileTypeFromBuffer } from "file-type";
+import jwt, { type JwtPayload } from "jsonwebtoken";
 import { randomUUID } from "node:crypto";
 import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
@@ -6,6 +9,13 @@ import type { Readable } from "node:stream";
 import { env } from "../env.js";
 
 type ImageCategory = "profile" | "playlist" | "music-artwork";
+export type DirectUploadCategory = ImageCategory | "music";
+
+const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const DIRECT_UPLOAD_TTL_SECONDS = 10 * 60;
+const UPLOAD_TOKEN_ISSUER = "music-box-upload";
+const UPLOAD_TOKEN_AUDIENCE = "direct-r2";
 
 const useR2 = env.STORAGE_DRIVER === "r2";
 const publicBase = env.R2_PUBLIC_URL?.replace(/\/$/, "");
@@ -18,6 +28,108 @@ const s3 = useR2 ? new S3Client({
 const r2Reference = (key: string) => `r2://${key}`;
 const r2Key = (reference: string) => reference.startsWith("r2://") ? reference.slice(5) : null;
 export const usingR2Storage = useR2;
+
+type DirectUploadToken = JwtPayload & {
+  key: string;
+  category: DirectUploadCategory;
+  contentType: string;
+  maxBytes: number;
+};
+
+function requestError(status: number, message: string) {
+  return Object.assign(new Error(message), { status });
+}
+
+function uploadRules(category: DirectUploadCategory, contentType: string) {
+  if (category === "music") {
+    if (!["audio/mpeg", "audio/mp3", "audio/x-mpeg", "audio/x-mp3", "audio/mpeg3"].includes(contentType.toLowerCase())) throw requestError(415, "Only valid MP3 files are accepted");
+    return { extension: "mp3", contentType: "audio/mpeg", maxBytes: Math.floor(env.MAX_MP3_MB * 1024 * 1024) };
+  }
+  const normalizedType = contentType.toLowerCase() === "image/jpg" ? "image/jpeg" : contentType.toLowerCase();
+  if (!(IMAGE_MIME_TYPES as readonly string[]).includes(normalizedType)) throw requestError(415, "Use a JPG, PNG, or WebP image");
+  const extensions: Record<(typeof IMAGE_MIME_TYPES)[number], string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
+  return { extension: extensions[normalizedType as (typeof IMAGE_MIME_TYPES)[number]], contentType: normalizedType, maxBytes: IMAGE_MAX_BYTES };
+}
+
+function imageUrl(key: string) {
+  return publicBase ? `${publicBase}/${key}` : `${env.PUBLIC_API_URL.replace(/\/$/, "")}/media/${key}`;
+}
+
+async function responseBytes(body: unknown) {
+  if (body && typeof body === "object" && "transformToByteArray" in body && typeof body.transformToByteArray === "function") {
+    return Buffer.from(await body.transformToByteArray());
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of body as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+/**
+ * Creates a short-lived, user-bound PUT URL so large files bypass Railway and
+ * travel straight from the device to R2. The object is not trusted until the
+ * matching completion call validates its R2 metadata and magic bytes.
+ */
+export async function beginDirectUpload(category: DirectUploadCategory, userId: string, contentType: string, declaredSize?: number) {
+  if (!useR2 || !s3) throw requestError(503, "Direct uploads require R2 storage");
+  const rules = uploadRules(category, contentType);
+  if (declaredSize !== undefined && (!Number.isSafeInteger(declaredSize) || declaredSize <= 0)) throw requestError(400, "Invalid file size");
+  if (declaredSize !== undefined && declaredSize > rules.maxBytes) throw requestError(413, "The selected file is too large");
+  const key = `${category}/${randomUUID()}.${rules.extension}`;
+  const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({ Bucket: env.R2_BUCKET!, Key: key, ContentType: rules.contentType }), {
+    expiresIn: DIRECT_UPLOAD_TTL_SECONDS,
+    signableHeaders: new Set(["content-type"])
+  });
+  const uploadToken = jwt.sign({ key, category, contentType: rules.contentType, maxBytes: rules.maxBytes }, env.JWT_SECRET, {
+    expiresIn: DIRECT_UPLOAD_TTL_SECONDS,
+    issuer: UPLOAD_TOKEN_ISSUER,
+    audience: UPLOAD_TOKEN_AUDIENCE,
+    subject: userId,
+    jwtid: randomUUID()
+  });
+  return { uploadUrl, uploadToken, contentType: rules.contentType, expiresIn: DIRECT_UPLOAD_TTL_SECONDS };
+}
+
+export function completeDirectUpload(category: "music", userId: string, uploadToken: string): Promise<{ key: string; reference: string; mimeType: string; size: number }>;
+export function completeDirectUpload(category: ImageCategory, userId: string, uploadToken: string): Promise<{ key: string; url: string; mimeType: string; size: number }>;
+export async function completeDirectUpload(category: DirectUploadCategory, userId: string, uploadToken: string) {
+  if (!useR2 || !s3) throw requestError(503, "Direct uploads require R2 storage");
+  let token: DirectUploadToken;
+  try {
+    token = jwt.verify(uploadToken, env.JWT_SECRET, {
+      issuer: UPLOAD_TOKEN_ISSUER,
+      audience: UPLOAD_TOKEN_AUDIENCE,
+      subject: userId
+    }) as DirectUploadToken;
+  } catch {
+    throw requestError(400, "The upload session is invalid or expired. Choose the file again.");
+  }
+  if (token.category !== category || typeof token.key !== "string" || !token.key.startsWith(`${category}/`) || typeof token.contentType !== "string" || typeof token.maxBytes !== "number") {
+    throw requestError(400, "The upload session does not match this file");
+  }
+  const removeInvalid = async () => s3.send(new DeleteObjectCommand({ Bucket: env.R2_BUCKET!, Key: token.key })).catch(() => undefined);
+  let head;
+  try {
+    head = await s3.send(new HeadObjectCommand({ Bucket: env.R2_BUCKET!, Key: token.key }));
+  } catch (error) {
+    if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) throw requestError(400, "The file did not reach storage. Please try again.");
+    throw error;
+  }
+  const size = head.ContentLength;
+  if (!size) { await removeInvalid(); throw requestError(400, "The uploaded file is empty"); }
+  if (size > token.maxBytes) { await removeInvalid(); throw requestError(413, "The selected file is too large"); }
+  if ((head.ContentType ?? "").toLowerCase() !== token.contentType.toLowerCase()) { await removeInvalid(); throw requestError(415, "The uploaded file type does not match the selection"); }
+
+  const sample = await s3.send(new GetObjectCommand({ Bucket: env.R2_BUCKET!, Key: token.key, Range: "bytes=0-65535" }));
+  if (!sample.Body) { await removeInvalid(); throw requestError(400, "The uploaded file could not be verified"); }
+  const detected = await fileTypeFromBuffer(await responseBytes(sample.Body));
+  const valid = category === "music" ? detected?.mime === "audio/mpeg" : !!detected && (IMAGE_MIME_TYPES as readonly string[]).includes(detected.mime);
+  if (!valid) {
+    await removeInvalid();
+    throw requestError(415, category === "music" ? "Only valid MP3 files are accepted" : "Use a JPG, PNG, or WebP image");
+  }
+  if (category === "music") return { key: token.key, reference: r2Reference(token.key), mimeType: detected!.mime, size };
+  return { key: token.key, url: imageUrl(token.key), mimeType: detected!.mime, size };
+}
 
 export async function saveImage(category: ImageCategory, buffer: Buffer, extension: string, contentType: string) {
   const filename = `${randomUUID()}.${extension}`;

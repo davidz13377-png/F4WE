@@ -6,10 +6,12 @@ import { prisma } from "../db.js";
 import { authenticate } from "../middleware/auth.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { songView } from "../services/catalog.js";
-import { deleteImage, saveImage } from "../services/storage.js";
+import { beginDirectUpload, completeDirectUpload, deleteImage, saveImage } from "../services/storage.js";
 
 const router = Router();
 const pictureUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+const directUploadRequest = z.object({ mimeType: z.string().min(1).max(100), size: z.number().int().positive().optional() }).strict();
+const directUploadCompletion = z.object({ uploadToken: z.string().min(1).max(5000) }).strict();
 router.use(authenticate);
 const input = z.object({ name: z.string().trim().min(1).max(100), description: z.string().trim().max(500).optional(), isPublic: z.boolean().default(false) });
 const accessible = (userId: string) => ({ OR: [{ isPublic: true }, { creatorId: userId }] });
@@ -52,6 +54,30 @@ router.get("/:id", asyncRoute(async (req, res) => {
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
   const { savedBy, songs, ...details } = playlist;
   res.json({ ...details, saved: !!savedBy.length, trackCount: songs.length, songs: songs.map(item => songView(item.music)) });
+}));
+
+router.post("/:id/picture/upload-url", asyncRoute(async (req, res) => {
+  const playlist = await prisma.album.findUnique({ where: { id: req.params.id as string } });
+  if (!playlist) return res.status(404).json({ error: "Playlist not found" });
+  if (playlist.creatorId !== req.auth!.userId) return res.status(403).json({ error: "Only the creator can change this playlist" });
+  const input = directUploadRequest.parse(req.body);
+  res.json(await beginDirectUpload("playlist", req.auth!.userId, input.mimeType, input.size));
+}));
+
+router.post("/:id/picture/complete", asyncRoute(async (req, res) => {
+  const playlist = await prisma.album.findUnique({ where: { id: req.params.id as string } });
+  if (!playlist) return res.status(404).json({ error: "Playlist not found" });
+  if (playlist.creatorId !== req.auth!.userId) return res.status(403).json({ error: "Only the creator can change this playlist" });
+  const { uploadToken } = directUploadCompletion.parse(req.body);
+  const uploaded = await completeDirectUpload("playlist", req.auth!.userId, uploadToken);
+  try {
+    await prisma.album.update({ where: { id: playlist.id }, data: { artworkUrl: uploaded.url } });
+  } catch (error) {
+    await deleteImage(uploaded.url, "playlist");
+    throw error;
+  }
+  await deleteImage(playlist.artworkUrl, "playlist");
+  res.json({ artworkUrl: uploaded.url });
 }));
 
 router.post("/:id/picture", pictureUpload.single("file"), asyncRoute(async (req, res) => {

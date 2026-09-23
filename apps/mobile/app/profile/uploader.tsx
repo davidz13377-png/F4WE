@@ -1,11 +1,10 @@
 import * as DocumentPicker from "expo-document-picker";
-import { File } from "expo-file-system";
 import { Redirect } from "expo-router";
 import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Button, Card, Input, Screen, Title, ui } from "../../src/components/UI";
 import { useAuth } from "../../src/context/AuthContext";
-import { uploadForm } from "../../src/lib/api";
+import { uploadFile } from "../../src/lib/api";
 import { colors } from "../../src/lib/theme";
 import { F4WEAlert as Alert } from "../../src/components/F4WEAlert";
 
@@ -25,14 +24,11 @@ export default function Uploader() {
     if (busy) return;
     try {
       setBusy(true);
-      const form = new FormData();
-      form.append("title", title);
-      if (artist) form.append("artist", artist);
-      if (artworkUrl) form.append("artworkUrl", artworkUrl);
-      // Expo fetch accepts File/Blob parts, not legacy React Native URI objects.
-      const mp3 = new File(file.uri);
-      form.append("file", mp3, file.name || mp3.name || "upload.mp3");
-      await uploadForm("/api/music/upload", form);
+      await uploadFile("/api/music/upload", { uri: file.uri, name: file.name || "upload.mp3", type: file.mimeType || "audio/mpeg", size: file.size }, {
+        title,
+        ...(artist ? { artist } : {}),
+        ...(artworkUrl ? { artworkUrl } : {})
+      });
       setFile(null);
       setTitle("");
       setArtist("");

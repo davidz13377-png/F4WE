@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { File } from "expo-file-system";
 import { ActivityIndicator, Image, Platform, Pressable, Switch, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Button, Empty, Screen, Title, ui } from "../../src/components/UI";
@@ -9,7 +8,7 @@ import { SongRow } from "../../src/components/SongRow";
 import { useAuth } from "../../src/context/AuthContext";
 import { useLibrary } from "../../src/context/LibraryContext";
 import { usePlayer } from "../../src/context/PlayerContext";
-import { api, uploadForm } from "../../src/lib/api";
+import { api, uploadFile } from "../../src/lib/api";
 import { F4WEAlert as Alert } from "../../src/components/F4WEAlert";
 import { profilePictureUrl } from "../../src/lib/media";
 import { colors } from "../../src/lib/theme";
@@ -45,11 +44,8 @@ export default function PlaylistScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: .85 });
       if (result.canceled || !result.assets?.length) return;
       const asset = result.assets[0];
-      const file = new File(asset.uri);
-      if (file.size > 5 * 1024 * 1024) throw new Error("Choose an image smaller than 5 MB.");
-      const form = new FormData();
-      form.append("file", file, file.name || "playlist-picture.jpg");
-      await uploadForm(`/api/playlists/${encodeURIComponent(id)}/picture`, form);
+      if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) throw new Error("Choose an image smaller than 5 MB.");
+      await uploadFile(`/api/playlists/${encodeURIComponent(id)}/picture`, { uri: asset.uri, name: asset.fileName || "playlist-picture.jpg", type: asset.mimeType || "image/jpeg", size: asset.fileSize });
       await load(); await library.refresh();
     } catch (e) { Alert.alert("Could not update playlist picture", e instanceof Error ? e.message : "Try again"); }
     finally { pictureBusy.current = false; setBusy(false); }

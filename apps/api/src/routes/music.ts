@@ -9,11 +9,13 @@ import { authenticate, requireRank } from "../middleware/auth.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { audit } from "../services/logging.js";
 import { songView } from "../services/catalog.js";
-import { deleteImage, deleteMusic, openMusic, saveImage, saveMusic, storedMusicName } from "../services/storage.js";
+import { beginDirectUpload, completeDirectUpload, deleteImage, deleteMusic, openMusic, saveImage, saveMusic, storedMusicName } from "../services/storage.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_MP3_MB * 1024 * 1024, files: 1 } });
 const artworkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
+const directUploadRequest = z.object({ mimeType: z.string().min(1).max(100), size: z.number().int().positive().optional() }).strict();
+const directUploadCompletion = z.object({ uploadToken: z.string().min(1).max(5000) }).strict();
 
 router.use(authenticate);
 
@@ -72,6 +74,29 @@ router.patch("/:id", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), as
   res.json(songView(updated));
 }));
 
+router.post("/:id/picture/upload-url", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
+  const song = await prisma.music.findUnique({ where: { id: req.params.id as string }, select: { id: true } });
+  if (!song) return res.status(404).json({ error: "Song not found" });
+  const input = directUploadRequest.parse(req.body);
+  res.json(await beginDirectUpload("music-artwork", req.auth!.userId, input.mimeType, input.size));
+}));
+
+router.post("/:id/picture/complete", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
+  const song = await prisma.music.findUnique({ where: { id: req.params.id as string } });
+  if (!song) return res.status(404).json({ error: "Song not found" });
+  const { uploadToken } = directUploadCompletion.parse(req.body);
+  const uploaded = await completeDirectUpload("music-artwork", req.auth!.userId, uploadToken);
+  try {
+    await prisma.music.update({ where: { id: song.id }, data: { artworkUrl: uploaded.url } });
+  } catch (error) {
+    await deleteImage(uploaded.url, "music-artwork");
+    throw error;
+  }
+  await deleteImage(song.artworkUrl, "music-artwork");
+  await audit("MUSIC_UPLOAD", req.auth!.userId, "music.artwork_updated", { musicId: song.id });
+  res.json({ artworkUrl: uploaded.url });
+}));
+
 router.post("/:id/picture", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), artworkUpload.single("file"), asyncRoute(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Image file is required" });
   const detected = await fileTypeFromBuffer(req.file.buffer);
@@ -105,6 +130,30 @@ router.delete("/:id", requireRank(Rank.Admin, Rank.Developer), asyncRoute(async 
   });
   // Keep the original MP3 on disk for recovery; DB cascades remove playlist/favorite links.
   res.status(204).end();
+}));
+
+router.post("/upload/upload-url", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
+  const input = directUploadRequest.parse(req.body);
+  res.json(await beginDirectUpload("music", req.auth!.userId, input.mimeType, input.size));
+}));
+
+router.post("/upload/complete", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
+  const input = z.object({
+    uploadToken: z.string().min(1).max(5000),
+    title: z.string().trim().min(1).max(150),
+    artist: z.string().trim().max(150).optional(),
+    artworkUrl: z.string().url().optional()
+  }).strict().parse(req.body ?? {});
+  const uploaded = await completeDirectUpload("music", req.auth!.userId, input.uploadToken);
+  let song;
+  try {
+    song = await prisma.music.create({ data: { title: input.title, artist: input.artist, artworkUrl: input.artworkUrl, filePath: uploaded.reference, mimeType: uploaded.mimeType, uploaderId: req.auth!.userId } });
+  } catch (error) {
+    await deleteMusic(uploaded.reference).catch(() => undefined);
+    throw error;
+  }
+  await audit("MUSIC_UPLOAD", req.auth!.userId, "music.uploaded", { musicId: song.id, title: song.title, artist: song.artist });
+  res.status(201).json(song);
 }));
 
 router.post("/upload", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), upload.single("file"), asyncRoute(async (req, res) => {

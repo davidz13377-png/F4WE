@@ -1,6 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { File } from "expo-file-system";
 import { useCallback, useState } from "react";
 import { Redirect, useFocusEffect } from "expo-router";
 import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
@@ -9,7 +8,7 @@ import { Button, Empty, Input, Screen, Title, ui } from "../../src/components/UI
 import { useAuth } from "../../src/context/AuthContext";
 import { useLibrary } from "../../src/context/LibraryContext";
 import { usePlayer } from "../../src/context/PlayerContext";
-import { api, uploadForm } from "../../src/lib/api";
+import { api, uploadFile } from "../../src/lib/api";
 import { F4WEAlert as Alert } from "../../src/components/F4WEAlert";
 import { profilePictureUrl } from "../../src/lib/media";
 import { colors } from "../../src/lib/theme";
@@ -56,18 +55,18 @@ export default function MusicManager() {
   const changePicture = async (removeImage = false) => {
     if (!editing || busy) return;
     try {
-      let form: FormData | null = null;
+      let selected: { uri: string; name: string; type: string; size?: number } | null = null;
       if (!removeImage) {
         if (Platform.OS === "ios") { const permission = await ImagePicker.requestMediaLibraryPermissionsAsync(); if (!permission.granted) return Alert.alert("Photo permission needed"); }
         const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: .85 });
         if (picked.canceled || !picked.assets?.length) return;
-        const file = new File(picked.assets[0].uri);
-        if (file.size > 5 * 1024 * 1024) throw new Error("Choose an image smaller than 5 MB.");
-        form = new FormData(); form.append("file", file, file.name || "music-artwork.jpg");
+        const asset = picked.assets[0];
+        if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) throw new Error("Choose an image smaller than 5 MB.");
+        selected = { uri: asset.uri, name: asset.fileName || "music-artwork.jpg", type: asset.mimeType || "image/jpeg", size: asset.fileSize };
       }
       setBusy(editing.id);
       const id = encodeURIComponent(editing.id);
-      const result = removeImage ? (await api(`/api/music/${id}/picture`, { method: "DELETE" }), { artworkUrl: null }) : await uploadForm<{ artworkUrl: string }>(`/api/music/${id}/picture`, form!);
+      const result = removeImage ? (await api(`/api/music/${id}/picture`, { method: "DELETE" }), { artworkUrl: null }) : await uploadFile<{ artworkUrl: string }>(`/api/music/${id}/picture`, selected!);
       const updated = { ...editing, artworkUrl: result.artworkUrl };
       setEditing(updated); setSongs(items => items.map(item => item.id === updated.id ? updated : item));
       await player.updateSongMetadata(updated); await library.refresh(); await load();

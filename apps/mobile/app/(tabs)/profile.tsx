@@ -1,7 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
 import * as ImagePicker from "expo-image-picker";
-import { File } from "expo-file-system";
 import { useRef, useState } from "react";
 import { router } from "expo-router";
 import { ActivityIndicator, Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
@@ -9,7 +8,7 @@ import { Button, Card, OwnerBadge, RankBadge, Screen, Title, ui } from "../../sr
 import { useAuth } from "../../src/context/AuthContext";
 import { colors } from "../../src/lib/theme";
 import { profilePictureUrl } from "../../src/lib/media";
-import { uploadForm } from "../../src/lib/api";
+import { uploadFile } from "../../src/lib/api";
 import { F4WEAlert as Alert } from "../../src/components/F4WEAlert";
 
 const items = [
@@ -31,12 +30,8 @@ export default function Profile() {
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [1, 1], quality: .85 });
       if (result.canceled || !result.assets?.length) return;
       const asset = result.assets[0];
-      const imageFile = new File(asset.uri);
-      if (imageFile.size > 5 * 1024 * 1024) throw new Error("Choose an image smaller than 5 MB.");
-      const form = new FormData();
-      // Expo fetch requires a real File/Blob, not a legacy { uri, name, type } object.
-      form.append("file", imageFile, imageFile.name || "profile-picture.jpg");
-      await uploadForm("/api/profile/me/picture", form);
+      if (asset.fileSize && asset.fileSize > 5 * 1024 * 1024) throw new Error("Choose an image smaller than 5 MB.");
+      await uploadFile("/api/profile/me/picture", { uri: asset.uri, name: asset.fileName || "profile-picture.jpg", type: asset.mimeType || "image/jpeg", size: asset.fileSize });
       await refresh();
     } catch (e) { Alert.alert("Could not update photo", e instanceof Error ? e.message : "Try again"); }
     finally { pictureBusy.current = false; setUploading(false); }
