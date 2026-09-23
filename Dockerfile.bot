@@ -8,8 +8,9 @@ RUN apt-get update \
   && python3 -m pip install --break-system-packages --no-cache-dir -U "yt-dlp[default]" "bgutil-ytdlp-pot-provider==2.0.0" \
   && git clone --depth 1 --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil-ytdlp-pot-provider \
   && cd /opt/bgutil-ytdlp-pot-provider/server \
-  && npm ci \
-  && npx tsc \
+  && npm ci --include=dev \
+  && ./node_modules/.bin/tsc \
+  && npm prune --omit=dev \
   && rm -rf /opt/bgutil-ytdlp-pot-provider/.git \
   && chown -R node:node /opt/bgutil-ytdlp-pot-provider \
   && rm -rf /var/lib/apt/lists/*
