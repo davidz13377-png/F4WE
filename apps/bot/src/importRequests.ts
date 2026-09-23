@@ -66,7 +66,7 @@ async function resolveCookiesPath() {
   if (!env.YT_DLP_COOKIES_BASE64) return undefined;
   const decoded = Buffer.from(env.YT_DLP_COOKIES_BASE64.replace(/\s+/g, ""), "base64");
   const firstLine = decoded.toString("utf8", 0, Math.min(decoded.length, 80)).split(/\r?\n/, 1)[0];
-  if (!firstLine || !/^# (?:HTTP|Netscape) Cookie File$/i.test(firstLine.trim())) {
+  if (!firstLine || !/^# (?:HTTP|Netscape HTTP) Cookie File$/i.test(firstLine.trim())) {
     throw new Error("YT_DLP_COOKIES_BASE64 is not a Netscape cookies.txt file");
   }
   const cookiePath = path.join(os.tmpdir(), `f4we-youtube-cookies-${process.pid}.txt`);
