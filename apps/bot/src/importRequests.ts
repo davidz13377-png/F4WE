@@ -64,13 +64,34 @@ async function resolveCookiesPath() {
     return env.YT_DLP_COOKIES_PATH;
   }
   if (!env.YT_DLP_COOKIES_BASE64) return undefined;
-  const decoded = Buffer.from(env.YT_DLP_COOKIES_BASE64.replace(/\s+/g, ""), "base64");
-  const firstLine = decoded.toString("utf8", 0, Math.min(decoded.length, 80)).split(/\r?\n/, 1)[0];
-  if (!firstLine || !/^# (?:HTTP|Netscape HTTP) Cookie File$/i.test(firstLine.trim())) {
-    throw new Error("YT_DLP_COOKIES_BASE64 is not a Netscape cookies.txt file");
+  let secret = env.YT_DLP_COOKIES_BASE64.trim();
+  if (secret.startsWith("YT_DLP_COOKIES_BASE64=")) secret = secret.slice("YT_DLP_COOKIES_BASE64=".length).trim();
+  if ((secret.startsWith('"') && secret.endsWith('"')) || (secret.startsWith("'") && secret.endsWith("'"))) {
+    secret = secret.slice(1, -1).trim();
+  }
+  let text: string;
+  if (/^# (?:HTTP|Netscape HTTP) Cookie File/im.test(secret)) {
+    text = secret.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
+  } else {
+    let decoded = Buffer.from(secret.replace(/\s+/g, ""), "base64").toString("utf8");
+    // Also tolerate a value that was accidentally encoded twice before it was
+    // pasted into Railway.
+    if (!/(?:^|\n)# (?:HTTP|Netscape HTTP) Cookie File/i.test(decoded) && /^[A-Za-z0-9+/=\s]+$/.test(decoded.trim())) {
+      decoded = Buffer.from(decoded.replace(/\s+/g, ""), "base64").toString("utf8");
+    }
+    text = decoded;
+  }
+  text = text.replace(/^\uFEFF/, "");
+  const headerIndex = text.search(/(?:^|\n)# (?:HTTP|Netscape HTTP) Cookie File/i);
+  if (headerIndex >= 0) text = text.slice(headerIndex).replace(/^\n/, "");
+  if (!text.trim()) throw new Error("YT_DLP_COOKIES_BASE64 decoded to an empty file");
+  // yt-dlp performs the authoritative Netscape parsing. Prefixing the standard
+  // header here avoids rejecting otherwise valid Railway secret formatting.
+  if (!/^# (?:HTTP|Netscape HTTP) Cookie File/i.test(text)) {
+    text = `# Netscape HTTP Cookie File\n${text}`;
   }
   const cookiePath = path.join(os.tmpdir(), `f4we-youtube-cookies-${process.pid}.txt`);
-  await fs.writeFile(cookiePath, decoded, { mode: 0o600 });
+  await fs.writeFile(cookiePath, text, { mode: 0o600 });
   return cookiePath;
 }
 
