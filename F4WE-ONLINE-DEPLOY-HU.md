@@ -104,6 +104,13 @@ RANK_CHANGE_LOG_CHANNEL=A_HELYI_ENV_BOL
 DEBUG_LOG_CHANNEL=1550942743927201974
 ```
 
+A `Dockerfile.bot` automatikusan telepíti a jelenlegi YouTube challenge-megoldót és a
+PO-token providert, ezért a `YT_DLP_POT_PROVIDER_HOME` változót nem kell kézzel
+felvenni. Ha a YouTube még így is blokkolja a Railway adatközponti IP-jét, a bot
+opcionálisan támogatja a `YT_DLP_PROXY` és `YT_DLP_COOKIES_BASE64` titkos
+változókat. Cookie-t kizárólag külön, erre létrehozott fiókból használj; soha ne
+tedd GitHubra, és ne használd a fő Google-fiókod munkamenetét.
+
 Az `AUTHORIZED_USER_IDS` és `AUTHORIZED_USER_RANKS` vesszővel elválasztott elemszáma pontosan ugyanannyi legyen. Példa egy emberhez:
 
 ```env

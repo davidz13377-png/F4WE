@@ -13,7 +13,7 @@ const sourcePath = path.join(__dirname, '../apps/bot/src/importRequests.ts');
 const source = fs.readFileSync(sourcePath, 'utf8').replaceAll('import.meta.url', JSON.stringify(pathToFileURL(sourcePath).href));
 const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
 const moduleOut = { exports: {} };
-let failDownload = false, spawned = 0;
+let failDownload = false, botCheckFailures = 0, spawned = 0;
 function spawn(_binary, args) {
   spawned++;
   assert.equal(args.at(-1), 'https://www.youtube.com/watch?v=abcdefghijk');
@@ -21,8 +21,15 @@ function spawn(_binary, args) {
   assert.ok(args.includes('--js-runtimes'));
   assert.ok(args.some(value => value.startsWith('node:')));
   assert.ok(args.includes('ba[protocol=https]/ba[protocol=http]/ba/b'));
+  assert.ok(args.includes('youtubepot-bgutilscript:server_home=/opt/test-pot-provider'));
   const child = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => {};
   process.nextTick(() => {
+    if (botCheckFailures > 0) {
+      botCheckFailures--;
+      child.stderr.emit('data', Buffer.from("ERROR: Sign in to confirm you're not a bot"));
+      child.emit('close', 1);
+      return;
+    }
     if (!failDownload) fs.writeFileSync(args[args.indexOf('-o') + 1].replace('%(ext)s', 'mp3'), Buffer.from('ID3\0\0\0\0'));
     child.emit('close', failDownload ? 1 : 0);
   });
@@ -31,7 +38,7 @@ function spawn(_binary, args) {
 function requireMock(name) {
   if (name === 'node:child_process') return { spawn };
   if (name === 'file-type') return { fileTypeFromFile: async () => ({ mime: 'audio/mpeg' }) };
-  if (name === './env.js') return { env: { API_UPLOAD_DIR: uploadDir, YT_DLP_BIN: 'mock-yt-dlp', FFMPEG_BIN: 'mock-ffmpeg' } };
+  if (name === './env.js') return { env: { API_UPLOAD_DIR: uploadDir, YT_DLP_BIN: 'mock-yt-dlp', FFMPEG_BIN: 'mock-ffmpeg', YT_DLP_POT_PROVIDER_HOME: '/opt/test-pot-provider' } };
   return require(name);
 }
 vm.runInNewContext(js, { module: moduleOut, exports: moduleOut.exports, require: requireMock, URL, Buffer, Date, Promise, console, setTimeout, clearTimeout, process });
@@ -56,10 +63,16 @@ const prisma = {
     assert.equal(fs.readFileSync(songs[0].filePath).subarray(0, 3).toString(), 'ID3');
     assert.equal(notifications.length, 1); assert.equal(events.at(-1).actionType, 'music_request.imported');
     row.status = 'Processing'; row.importStartedAt = null; row.importedMusicId = null; row.id = 'request2';
+    botCheckFailures = 2;
+    await moduleOut.exports.importQueuedRequests(prisma);
+    assert.equal(row.status, 'Accepted');
+    assert.equal(songs.length, 2);
+    assert.equal(spawned, 4); // first import + two protected-client retries + success
+    row.status = 'Processing'; row.importStartedAt = null; row.importedMusicId = null; row.id = 'request2';
     failDownload = true;
     const originalError = console.error; console.error = () => {};
     try { await moduleOut.exports.importQueuedRequests(prisma); } finally { console.error = originalError; }
-    assert.equal(row.status, 'Rejected'); assert.equal(songs.length, 1);
+    assert.equal(row.status, 'Rejected'); assert.equal(songs.length, 2);
     assert.equal(events.at(-1).actionType, 'music_request.import_failed');
     row.status = 'Processing'; row.importStartedAt = null; row.id = 'request3'; row.sourceUrl = 'https://evil.example/watch?v=abcdefghijk';
     const before = spawned;
