@@ -35,7 +35,7 @@ export default function Profile() {
       if (imageFile.size > 5 * 1024 * 1024) throw new Error("Choose an image smaller than 5 MB.");
       const form = new FormData();
       // Expo fetch requires a real File/Blob, not a legacy { uri, name, type } object.
-      form.append("file", imageFile);
+      form.append("file", imageFile, imageFile.name || "profile-picture.jpg");
       await uploadForm("/api/profile/me/picture", form);
       await refresh();
     } catch (e) { Alert.alert("Could not update photo", e instanceof Error ? e.message : "Try again"); }

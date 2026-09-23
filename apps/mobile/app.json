@@ -10,16 +10,41 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "infoPlist": { "UIBackgroundModes": ["audio"] }
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      }
     },
     "android": {
       "package": "com.musicbox.app",
       "icon": "./assets/F4WE-icon.png",
-      "adaptiveIcon": { "foregroundImage": "./assets/F4WE-adaptive.png", "backgroundColor": "#000000" },
-      "permissions": ["FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MEDIA_PLAYBACK", "POST_NOTIFICATIONS"]
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/F4WE-adaptive.png",
+        "backgroundColor": "#000000"
+      },
+      "permissions": [
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "POST_NOTIFICATIONS"
+      ]
     },
-    "plugins": ["expo-router", "expo-secure-store", "expo-document-picker", "./plugins/withF4WEAndroid"],
-    "experiments": { "typedRoutes": true },
-    "extra": { "apiUrl": "http://10.0.2.2:4000" }
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-document-picker",
+      "./plugins/withF4WEAndroid"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiUrl": "https://f4we-api-production.up.railway.app",
+      "router": {},
+      "eas": {
+        "projectId": "ef1939eb-1aa4-4c08-bd6d-9f20a277c7d5"
+      }
+    },
+    "owner": "notxenom"
   }
 }

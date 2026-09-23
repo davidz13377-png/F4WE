@@ -63,7 +63,7 @@ export default function MusicManager() {
         if (picked.canceled || !picked.assets?.length) return;
         const file = new File(picked.assets[0].uri);
         if (file.size > 5 * 1024 * 1024) throw new Error("Choose an image smaller than 5 MB.");
-        form = new FormData(); form.append("file", file);
+        form = new FormData(); form.append("file", file, file.name || "music-artwork.jpg");
       }
       setBusy(editing.id);
       const id = encodeURIComponent(editing.id);

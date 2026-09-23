@@ -12,7 +12,14 @@ import { F4WEAlert as Alert } from "../../src/components/F4WEAlert";
 export default function Uploader() {
   const { user } = useAuth(); const [file, setFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null); const [title, setTitle] = useState(""); const [artist, setArtist] = useState(""); const [artworkUrl, setArtwork] = useState(""); const [busy, setBusy] = useState(false);
   if (!user || (user.rank === "Access" && !user.isOwner)) return <Redirect href="/(tabs)/profile" />;
-  const choose = async () => { const result = await DocumentPicker.getDocumentAsync({ type: "audio/mpeg", copyToCacheDirectory: true }); if (!result.canceled) setFile(result.assets[0]); };
+  const choose = async () => {
+    const result = await DocumentPicker.getDocumentAsync({ type: "audio/mpeg", copyToCacheDirectory: true });
+    if (!result.canceled) {
+      const selected = result.assets[0];
+      setFile(selected);
+      if (!title.trim()) setTitle(selected.name.replace(/\.mp3$/i, ""));
+    }
+  };
   const upload = async () => {
     if (!file) return Alert.alert("Choose an MP3 first");
     if (busy) return;
@@ -23,7 +30,8 @@ export default function Uploader() {
       if (artist) form.append("artist", artist);
       if (artworkUrl) form.append("artworkUrl", artworkUrl);
       // Expo fetch accepts File/Blob parts, not legacy React Native URI objects.
-      form.append("file", new File(file.uri));
+      const mp3 = new File(file.uri);
+      form.append("file", mp3, file.name || mp3.name || "upload.mp3");
       await uploadForm("/api/music/upload", form);
       setFile(null);
       setTitle("");

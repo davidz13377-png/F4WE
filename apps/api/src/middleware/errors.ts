@@ -7,6 +7,10 @@ export const asyncRoute = (fn: (req: Request, res: Response, next: NextFunction)
 
 export function errorHandler(error: unknown, req: Request, res: Response, _next: NextFunction) {
   if (error instanceof ZodError) return res.status(400).json({ error: "Validation failed", fields: error.flatten() });
+  if (typeof error === "object" && error && "name" in error && error.name === "MulterError") {
+    const code = "code" in error && typeof error.code === "string" ? error.code : "";
+    return res.status(code === "LIMIT_FILE_SIZE" ? 413 : 400).json({ error: code === "LIMIT_FILE_SIZE" ? "The selected file is too large" : "Invalid file upload" });
+  }
   if (typeof error === "object" && error && "status" in error && typeof error.status === "number") {
     return res.status(error.status).json({ error: error instanceof Error ? error.message : "Request failed" });
   }

@@ -9,6 +9,7 @@ import { asyncRoute } from "../middleware/errors.js";
 import { audit } from "../services/logging.js";
 import { notifyUser } from "../services/realtime.js";
 import { deleteImage, saveImage } from "../services/storage.js";
+import { canonicalSpotifyTrackUrl, spotifyTrackMetadata } from "../services/spotify.js";
 
 const router = Router();
 const pictureUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -51,12 +52,20 @@ router.get("/requests", asyncRoute(async (req, res) => {
 router.post("/requests", asyncRoute(async (req, res) => {
   const { sourceUrl } = z.object({ sourceUrl: z.string().url().max(250) }).strict().parse(req.body);
   const url = new URL(sourceUrl);
-  if (url.protocol !== "https:" || !["www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"].includes(url.hostname)) return res.status(400).json({ error: "Use a YouTube video URL" });
-  const videoId = url.hostname === "youtu.be" ? url.pathname.slice(1) : url.pathname === "/watch" ? url.searchParams.get("v") : url.pathname.startsWith("/shorts/") ? url.pathname.split("/")[2] : null;
-  if (!videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) return res.status(400).json({ error: "Submit one YouTube video per request" });
-  const canonicalUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  const item = await prisma.musicRequest.create({ data: { userId: req.auth!.userId, songsRequested: canonicalUrl, sourceUrl: canonicalUrl } });
-  await audit("MUSIC_REQUEST", req.auth!.userId, "music_request.submitted", { requestId: item.id, sourceUrl: canonicalUrl });
+  const spotifyUrl = canonicalSpotifyTrackUrl(url);
+  const isYouTube = url.protocol === "https:" && ["www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be"].includes(url.hostname);
+  const videoId = isYouTube ? (url.hostname === "youtu.be" ? url.pathname.slice(1) : url.pathname === "/watch" ? url.searchParams.get("v") : url.pathname.startsWith("/shorts/") ? url.pathname.split("/")[2] : null) : null;
+  const youtubeUrl = videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId) ? `https://www.youtube.com/watch?v=${videoId}` : null;
+  if (!youtubeUrl && !spotifyUrl) return res.status(400).json({ error: "Use one YouTube video or Spotify track URL" });
+  const canonicalUrl = spotifyUrl ?? youtubeUrl!;
+  const spotify = spotifyUrl ? await spotifyTrackMetadata(spotifyUrl) : null;
+  const item = await prisma.musicRequest.create({ data: {
+    userId: req.auth!.userId,
+    songsRequested: spotify?.title ? `${spotify.title} (Spotify)` : canonicalUrl,
+    sourceUrl: canonicalUrl,
+    requestedTitle: spotify?.title ?? null
+  } });
+  await audit("MUSIC_REQUEST", req.auth!.userId, "music_request.submitted", { requestId: item.id, sourceUrl: canonicalUrl, provider: spotifyUrl ? "spotify" : "youtube" });
   res.status(201).json(item);
 }));
 
@@ -145,7 +154,7 @@ router.patch("/staff/requests/:id", requireRank(Rank.Admin, Rank.Developer), asy
   const existing = await prisma.musicRequest.findUnique({ where: { id: req.params.id as string } });
   if (!existing) return res.status(404).json({ error: "Music request not found" });
   if (existing.status !== "Pending") return res.status(409).json({ error: "Only pending requests can be reviewed" });
-  if (existing.sourceUrl && input.status === "Accepted") return res.status(400).json({ error: "Use the plus button to import a YouTube request" });
+  if (existing.sourceUrl?.includes("youtube.com/") && input.status === "Accepted") return res.status(400).json({ error: "Use the plus button to import a YouTube request" });
   const changed = await prisma.musicRequest.updateMany({ where: { id: existing.id, status: "Pending" }, data: { status: input.status, rejectionReason: input.reason, processedDate: new Date() } });
   if (!changed.count) return res.status(409).json({ error: "Request already being processed" });
   const item = await prisma.musicRequest.findUniqueOrThrow({ where: { id: existing.id } });
@@ -159,6 +168,9 @@ router.patch("/staff/requests/:id", requireRank(Rank.Admin, Rank.Developer), asy
 router.post("/staff/requests/:id/import", requireRank(Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
   const { title, artist } = z.object({ title: z.string().trim().min(1).max(150), artist: z.string().trim().min(1).max(150) }).strict().parse(req.body);
   const id = req.params.id as string;
+  const existing = await prisma.musicRequest.findUnique({ where: { id } });
+  if (!existing) return res.status(404).json({ error: "Music request not found" });
+  if (!existing.sourceUrl?.startsWith("https://www.youtube.com/watch?v=")) return res.status(400).json({ error: "Spotify audio cannot be copied. Upload an authorized MP3 in Music Uploader, then accept the request." });
   const result = await prisma.musicRequest.updateMany({ where: { id, status: "Pending", sourceUrl: { not: null } },
     data: { requestedTitle: title, requestedArtist: artist, status: "Processing", importStartedAt: null, rejectionReason: null } });
   if (!result.count) return res.status(409).json({ error: "This request is not pending or has no YouTube link" });

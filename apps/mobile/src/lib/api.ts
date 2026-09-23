@@ -5,12 +5,7 @@ export const API_URL = (process.env.EXPO_PUBLIC_API_URL || Constants.expoConfig?
 let authToken: string | null = null;
 export const setApiToken = (token: string | null) => { authToken = token; };
 
-export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: { ...(!isForm ? { "Content-Type": "application/json" } : {}), ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...options.headers }
-  });
+async function readResponse<T>(response: Response): Promise<T> {
   if (response.status === 204) return undefined as T;
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -19,7 +14,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       title: "Song title",
       artist: "Artist",
       artworkUrl: "Artwork URL",
-      file: "MP3 file"
+      file: "File"
     };
     const fieldErrors = body?.fields?.fieldErrors;
     if (fieldErrors && typeof fieldErrors === "object") {
@@ -43,8 +38,34 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   return body as T;
 }
 
-export function uploadForm<T>(path: string, body: FormData) {
-  return api<T>(path, { method: "POST", body });
+function isFormDataBody(body: RequestInit["body"]): body is FormData {
+  if (!body || typeof body !== "object") return false;
+  // React Native/Expo can expose FormData from a different JS realm, where
+  // `instanceof FormData` is false even though the value is valid FormData.
+  return typeof (body as FormData).append === "function"
+    && (Object.prototype.toString.call(body) === "[object FormData]"
+      || (body as { constructor?: { name?: string } }).constructor?.name === "FormData"
+      || Array.isArray((body as { _parts?: unknown })._parts));
+}
+
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const isForm = isFormDataBody(options.body);
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: { ...(!isForm ? { "Content-Type": "application/json" } : {}), ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...options.headers }
+  });
+  return readResponse<T>(response);
+}
+
+export async function uploadForm<T>(path: string, body: FormData) {
+  // Do not pass multipart uploads through the generic JSON request path.
+  // Expo fetch must generate the boundary and Content-Type itself.
+  const response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: { Accept: "application/json", ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    body
+  });
+  return readResponse<T>(response);
 }
 
 export const currentToken = () => authToken;

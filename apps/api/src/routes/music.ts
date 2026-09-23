@@ -108,7 +108,7 @@ router.delete("/:id", requireRank(Rank.Admin, Rank.Developer), asyncRoute(async 
 }));
 
 router.post("/upload", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), upload.single("file"), asyncRoute(async (req, res) => {
-  const meta = z.object({ title: z.string().trim().min(1).max(150), artist: z.string().trim().max(150).optional(), artworkUrl: z.string().url().optional() }).parse(req.body);
+  const meta = z.object({ title: z.string().trim().min(1).max(150), artist: z.string().trim().max(150).optional(), artworkUrl: z.string().url().optional() }).parse(req.body ?? {});
   if (!req.file) return res.status(400).json({ error: "MP3 file is required" });
   const detected = await fileTypeFromBuffer(req.file.buffer);
   if (detected?.mime !== "audio/mpeg") return res.status(415).json({ error: "Only valid MP3 files are accepted" });

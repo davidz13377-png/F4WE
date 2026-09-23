@@ -48,7 +48,7 @@ export default function PlaylistScreen() {
       const file = new File(asset.uri);
       if (file.size > 5 * 1024 * 1024) throw new Error("Choose an image smaller than 5 MB.");
       const form = new FormData();
-      form.append("file", file);
+      form.append("file", file, file.name || "playlist-picture.jpg");
       await uploadForm(`/api/playlists/${encodeURIComponent(id)}/picture`, form);
       await load(); await library.refresh();
     } catch (e) { Alert.alert("Could not update playlist picture", e instanceof Error ? e.message : "Try again"); }

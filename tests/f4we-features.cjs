@@ -101,7 +101,10 @@ const storageMock = {
   openMusic: async () => null,
   storedMusicName: value => path.basename(value)
 };
-const mocks = { "../db.js": { prisma: db }, "../middleware/auth.js": auth, "../middleware/errors.js": errors, "../env.js": { env }, "../services/catalog.js": catalog, "../services/logging.js": { audit: async () => {} }, "../services/realtime.js": { notifyUser: () => {} }, "../services/storage.js": storageMock, "file-type": { fileTypeFromBuffer: buffer => detector(buffer) } };
+const mocks = { "../db.js": { prisma: db }, "../middleware/auth.js": auth, "../middleware/errors.js": errors, "../env.js": { env }, "../services/catalog.js": catalog, "../services/logging.js": { audit: async () => {} }, "../services/realtime.js": { notifyUser: () => {} }, "../services/storage.js": storageMock, "../services/spotify.js": {
+  canonicalSpotifyTrackUrl: url => url.protocol === "https:" && url.hostname === "open.spotify.com" && /^\/track\/[A-Za-z0-9]{22}$/.test(url.pathname) ? `https://open.spotify.com${url.pathname}` : null,
+  spotifyTrackMetadata: async () => ({ title: "Spotify test track", artworkUrl: "https://i.scdn.co/image/test" })
+}, "file-type": { fileTypeFromBuffer: buffer => detector(buffer) } };
 const app = express(); app.use(express.json());
 app.use("/api/auth", load("apps/api/src/routes/auth.ts", mocks).default);
 app.use("/api/playlists", load("apps/api/src/routes/playlists.ts", mocks).default);
@@ -134,10 +137,15 @@ async function main() {
     actor = owner;
     assert.equal((await request("POST", "/api/profile/requests", { sourceUrl: "https://example.com/watch?v=abcdefghijk" })).status, 400);
     assert.equal((await request("POST", "/api/profile/requests", { sourceUrl: "https://www.youtube.com/playlist?list=foo" })).status, 400);
+    assert.equal((await request("POST", "/api/profile/requests", { sourceUrl: "https://open.spotify.com/album/4cOdK2wGLETKBW3PvgPWqT" })).status, 400);
+    const spotify = await request("POST", "/api/profile/requests", { sourceUrl: "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=test" });
+    assert.equal(spotify.status, 201); assert.equal(spotify.body.sourceUrl, "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"); assert.equal(spotify.body.requestedTitle, "Spotify test track");
     const queued = await request("POST", "/api/profile/requests", { sourceUrl: "https://youtu.be/abcdefghijk?t=31" });
     assert.equal(queued.status, 201); assert.equal(queued.body.sourceUrl, "https://www.youtube.com/watch?v=abcdefghijk");
     assert.equal((await request("POST", `/api/profile/staff/requests/${queued.body.id}/import`, { title: "Song", artist: "Artist" })).status, 403);
     actor = { ...owner, rank: "Admin" };
+    assert.equal((await request("POST", `/api/profile/staff/requests/${spotify.body.id}/import`, { title: "Song", artist: "Artist" })).status, 400);
+    assert.equal((await request("PATCH", `/api/profile/staff/requests/${spotify.body.id}`, { status: "Accepted" })).status, 200);
     assert.equal((await request("POST", `/api/profile/staff/requests/${queued.body.id}/import`, { title: " ", artist: "Artist" })).status, 400);
     assert.equal((await request("POST", `/api/profile/staff/requests/${queued.body.id}/import`, { title: "Song", artist: "Artist" })).status, 202);
     assert.equal((await request("POST", `/api/profile/staff/requests/${queued.body.id}/import`, { title: "Song", artist: "Artist" })).status, 409);
