@@ -17,6 +17,10 @@ const uploader = read("apps/mobile/app/profile/uploader.tsx"), manager = read("a
 assert.ok(uploader.includes("launchImageLibraryAsync") && uploader.includes("Timed .lrc") && uploader.includes("Plain .txt"), "Phone artwork / lyrics upload is incomplete");
 assert.ok(manager.includes("saveLyrics") && manager.includes("removeLyrics"), "Lyrics cannot be updated later");
 
+const bot = read("apps/bot/src/index.ts"), botLyrics = read("apps/bot/src/lyrics.ts");
+assert.ok(bot.includes('setName("szoveg")') && bot.includes("downloadLyricsFile") && bot.includes("lyrics_updated_from_discord"), "Discord lyrics upload command is incomplete");
+assert.ok(botLyrics.includes("MAX_LYRICS_BYTES") && botLyrics.includes("TextDecoder") && botLyrics.includes("timedLine"), "Discord lyrics file validation is incomplete");
+
 const friends = read("apps/mobile/app/friends.tsx"), friendRoutes = read("apps/api/src/routes/friends.ts");
 assert.ok(friends.includes('type Tab = "friends" | "search" | "requests"') && friends.includes("followUser"), "Friends tabs or listen-together UI is missing");
 assert.ok(friendRoutes.includes('/requests/:id/accept') && friendRoutes.includes("prisma.friendship.upsert"), "Friend request acceptance is missing");

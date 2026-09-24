@@ -3,6 +3,7 @@ import { Client, EmbedBuilder, Events, GatewayIntentBits, MessageFlags, SlashCom
 import { PrismaClient, Rank } from "@prisma/client";
 import { authorized, env } from "./env.js";
 import { importQueuedRequests } from "./importRequests.js";
+import { downloadLyricsFile, type LyricsType } from "./lyrics.js";
 
 const prisma = new PrismaClient();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -30,6 +31,12 @@ const commands = [
     .addStringOption(o => o.setName("sort").setDescription("Sort direction").addChoices({ name: "Newest", value: "desc" }, { name: "Oldest", value: "asc" })),
   new SlashCommandBuilder().setName("keylist").setDescription("Show access-key totals"),
   new SlashCommandBuilder().setName("validkey").setDescription("List currently unused access keys"),
+  new SlashCommandBuilder().setName("szoveg").setDescription("Dalszöveg hozzáadása egy F4WE zenéhez")
+    .addStringOption(o => o.setName("tipus").setDescription("A dalszöveg típusa").setRequired(true).addChoices(
+      { name: "Követős (.lrc)", value: "timed" }, { name: "Sima szöveg (.txt)", value: "plain" }
+    ))
+    .addStringOption(o => o.setName("zene").setDescription("Az appban látható pontos zenecím vagy zene-ID").setMinLength(1).setMaxLength(150).setRequired(true))
+    .addAttachmentOption(o => o.setName("fajl").setDescription("A feltöltendő .lrc vagy .txt fájl").setRequired(true)),
   new SlashCommandBuilder().setName("logstart").setDescription("Activate every F4WE logging channel")
 ].map(command => command.toJSON());
 
@@ -149,6 +156,41 @@ async function onCommand(interaction: ChatInputCommandInteraction) {
     const keys = await prisma.accessKey.findMany({ where: { used: false }, orderBy: { createdDate: "desc" }, take: 50 });
     const content = keys.length ? keys.map(k => `\`${k.key}\` • **${k.usageLimit - k.usedCount}/${k.usageLimit}** uses left • <t:${Math.floor(k.createdDate.getTime() / 1000)}:R>`).join("\n") : "No valid keys.";
     return interaction.editReply({ content });
+  }
+
+  if (interaction.commandName === "szoveg") {
+    if (!requireBotRank(interaction, "Moderator")) return;
+    const type = interaction.options.getString("tipus", true) as LyricsType;
+    const songQuery = interaction.options.getString("zene", true).trim();
+    const attachment = interaction.options.getAttachment("fajl", true);
+    const songs = await prisma.music.findMany({
+      where: { OR: [{ id: songQuery }, { title: { equals: songQuery, mode: "insensitive" } }] },
+      orderBy: { uploadDate: "desc" },
+      take: 6,
+      select: { id: true, title: true, artist: true }
+    });
+    if (!songs.length) return interaction.editReply({ content: `Nem található zene ezzel a pontos címmel vagy ID-val: **${songQuery}**` });
+
+    const idMatch = songs.find(song => song.id === songQuery);
+    if (!idMatch && songs.length > 1) {
+      const matches = songs.map(song => `\`${song.id}\` • **${song.title}**${song.artist ? ` — ${song.artist}` : ""}`).join("\n");
+      return interaction.editReply({ content: `Több zene is pontosan ezt a címet használja. Futtasd újra a parancsot, és a **zene** mezőbe másold a megfelelő ID-t:\n${matches}` });
+    }
+
+    const song = idMatch ?? songs[0]!;
+    const content = await downloadLyricsFile(attachment, type);
+    await prisma.$transaction([
+      prisma.music.update({ where: { id: song.id }, data: { lyrics: content, lyricsSynced: type === "timed" } }),
+      prisma.logEvent.create({
+        data: {
+          type: "MUSIC_UPLOAD",
+          userId: interaction.user.id,
+          actionType: "music.lyrics_updated_from_discord",
+          details: { musicId: song.id, title: song.title, lyricsType: type, filename: attachment.name, updatedByDiscordId: interaction.user.id }
+        }
+      })
+    ]);
+    return interaction.editReply({ content: `Kész: **${song.title}** dalszövege feltöltve (${type === "timed" ? "követős .lrc" : "sima .txt"}). Az app a következő megnyitáskor/frissítéskor már betölti.` });
   }
 
   if (interaction.commandName === "logstart") {
