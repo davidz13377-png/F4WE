@@ -16,6 +16,6 @@ export default function Favorites() {
   return <Screen><Stack.Screen options={{ title: "Favorites" }} /><Title subtitle={library.favorites.length + " liked songs"}>Favorites</Title>
     {library.error ? <Text style={{ color: colors.red }}>{library.error}</Text> : null}
     {library.loading ? <ActivityIndicator color={colors.accent} /> : null}
-    {library.favorites.length ? <><Button title="Play favorites" icon="play" onPress={() => void player.play(library.favorites[0], library.favorites)} /><View style={{ height: 16 }} />{library.favorites.map(song => <SongRow key={song.id} song={song} queue={library.favorites} />)}</> : !library.loading ? <Empty label="Tap a song's heart to save it here" /> : null}
+    {library.favorites.length ? <><Button title="Play favorites" icon="play" onPress={() => void player.play(library.favorites[0], library.favorites, { queueControls: true })} /><View style={{ height: 16 }} />{library.favorites.map(song => <SongRow key={song.id} song={song} queue={library.favorites} queueControls />)}</> : !library.loading ? <Empty label="Tap a song's heart to save it here" /> : null}
   </Screen>;
 }

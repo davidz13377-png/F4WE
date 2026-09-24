@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { Redirect } from "expo-router";
-import { Image, Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { Button, Card, Empty, Input, OwnerBadge, RankBadge, Screen, Title, ui } from "../../src/components/UI";
 import { useAuth } from "../../src/context/AuthContext";
 import { api } from "../../src/lib/api";
-import { profilePictureUrl } from "../../src/lib/media";
 import { colors } from "../../src/lib/theme";
 import type { Rank, User } from "../../src/types";
 import { F4WEAlert as Alert } from "../../src/components/F4WEAlert";
+import { ProfilePicture } from "../../src/components/ProfilePicture";
 
 export default function Developer() {
   const { user, refresh } = useAuth();
@@ -42,7 +42,7 @@ export default function Developer() {
     } }]);
   };
   return <Screen><Title subtitle="Rename accounts, manage ranks and profile pictures, or permanently remove users.">Dev Portal</Title><Text style={ui.section}>User Manager</Text><Input placeholder="Search username or 16-digit ID" value={query} onChangeText={setQuery} />
-    {users.length ? users.map(item => <Pressable key={item.id} onPress={() => open(item)}><Card><View style={[ui.row, { justifyContent: "space-between", gap: 12 }]}><View style={[ui.row, { flex: 1, gap: 12 }]}>{item.profilePicture ? <Image source={{ uri: profilePictureUrl(item.profilePicture) }} style={{ width: 44, height: 44, borderRadius: 22 }} /> : <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: colors.raised, alignItems: "center", justifyContent: "center" }}><Text style={ui.body}>{item.username[0]?.toUpperCase()}</Text></View>}<View style={{ flex: 1 }}><Text style={[ui.body, { fontWeight: "700" }]}>{item.username}</Text><Text style={[ui.muted, { fontFamily: "monospace", marginTop: 4 }]}>{item.id}</Text></View></View><View>{item.isOwner ? <OwnerBadge /> : null}<RankBadge rank={item.rank} /></View></View></Card></Pressable>) : <Empty label="No users found" />}
+    {users.length ? users.map(item => <Pressable key={item.id} onPress={() => open(item)}><Card><View style={[ui.row, { justifyContent: "space-between", gap: 12 }]}><View style={[ui.row, { flex: 1, gap: 12 }]}><ProfilePicture user={item} size={44} /><View style={{ flex: 1 }}><Text style={[ui.body, { fontWeight: "700" }]}>{item.username}</Text><Text style={[ui.muted, { fontFamily: "monospace", marginTop: 4 }]}>{item.id}</Text></View></View><View>{item.isOwner ? <OwnerBadge /> : null}<RankBadge rank={item.rank} /></View></View></Card></Pressable>) : <Empty label="No users found" />}
     <Modal visible={!!selected} transparent animationType="slide" onRequestClose={close}><View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "#000A" }}><View style={{ maxHeight: "90%", backgroundColor: colors.surface, padding: 22, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}><ScrollView keyboardShouldPersistTaps="handled"><Text style={[ui.section, { marginTop: 0 }]}>Manage account</Text><Text style={[ui.muted, { marginBottom: 12, fontFamily: "monospace" }]}>{selected?.id}</Text>
       {selected?.isOwner ? <Text style={[ui.body, { color: colors.gold }]}>Protected Owner account. Only /addowner can grant this role.</Text> : <><Text style={ui.label}>Username</Text><Input value={username} maxLength={32} onChangeText={setUsername} editable={!busy} /><Button title="Save username" icon="save-outline" loading={busy} onPress={() => void rename()} />
       <Text style={ui.section}>Rank</Text>{(["Access", "Moderator", "Admin", "Developer"] as Rank[]).map(rank => <View key={rank} style={{ marginBottom: 9 }}><Button title={rank} tone={rank === "Admin" ? "red" : "dark"} loading={busy} onPress={() => void apply(rank)} /></View>)}

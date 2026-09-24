@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
-import { ActivityIndicator, Modal, Pressable, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Empty, Input, Screen, Title, ui } from "../../src/components/UI";
 import { PlaylistRow } from "../../src/components/PlaylistRow";
@@ -10,6 +10,7 @@ import { api } from "../../src/lib/api";
 import { colors } from "../../src/lib/theme";
 import type { Playlist } from "../../src/types";
 import { F4WEAlert as Alert } from "../../src/components/F4WEAlert";
+import { VisibilityToggle } from "../../src/components/VisibilityToggle";
 
 export default function Library() {
   const library = useLibrary(), insets = useSafeAreaInsets();
@@ -38,7 +39,7 @@ export default function Library() {
     <Modal visible={open} transparent animationType="slide" onRequestClose={() => { if (!busy) setOpen(false); }}><View style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "#0009" }}>
       <View style={{ backgroundColor: colors.surface, padding: 22, paddingBottom: insets.bottom + 22, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
         <Text style={[ui.section, { marginTop: 0 }]}>New playlist</Text><Input placeholder="Playlist name" maxLength={100} value={name} onChangeText={setName} /><Input placeholder="Description" maxLength={500} value={description} onChangeText={setDescription} multiline />
-        <View style={[ui.row, { justifyContent: "space-between", marginVertical: 14 }]}><Text style={ui.body}>{isPublic ? "Public playlist" : "Private playlist (default)"}</Text><Switch value={isPublic} onValueChange={setPublic} trackColor={{ true: colors.accent }} /></View>
+        <Text style={[ui.label, { marginTop: 6 }]}>Who can open it?</Text><VisibilityToggle value={isPublic} onChange={setPublic} disabled={busy} /><Text style={[ui.muted, { marginTop: 8, marginBottom: 16 }]}>{isPublic ? "Anyone can find this playlist in Search." : "Only you can open it. Private is the default."}</Text>
         <Button title="Create" loading={busy} onPress={() => void create()} /><View style={{ height: 10 }} /><Button title="Cancel" tone="dark" loading={busy} onPress={() => setOpen(false)} />
       </View></View></Modal>
   </Screen>;

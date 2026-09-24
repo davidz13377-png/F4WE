@@ -6,6 +6,7 @@ import { ActivityIndicator, Image, Modal, PanResponder, Pressable, ScrollView, S
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "../lib/theme";
 import { usePlayer } from "../context/PlayerContext";
+import { api } from "../lib/api";
 
 function time(seconds: number) {
   const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
@@ -18,11 +19,28 @@ export function MiniPlayer() {
   const openPlayer = Array.isArray(params.openPlayer) ? params.openPlayer[0] : params.openPlayer;
   const [expanded, setExpanded] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
+  const [lyrics, setLyrics] = useState<{ type: "plain" | "timed"; content: string } | null>(null);
+  const [lyricsLoading, setLyricsLoading] = useState(false);
+  const lyricsScroll = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   useEffect(() => { setPreview(null); }, [player.active?.id]);
   useEffect(() => { if (openPlayer) setExpanded(true); }, [openPlayer]);
+  useEffect(() => {
+    let live = true; setLyrics(null);
+    if (!expanded || !player.active?.id) return;
+    setLyricsLoading(true);
+    void api<{ type: "plain" | "timed"; content: string }>(`/api/music/${encodeURIComponent(String(player.active.id))}/lyrics`)
+      .then(value => { if (live) setLyrics(value); }).catch(() => { if (live) setLyrics(null); }).finally(() => { if (live) setLyricsLoading(false); });
+    return () => { live = false; };
+  }, [expanded, player.active?.id]);
   const active = player.active;
+  const timedLines = lyrics?.type === "timed" ? parseLrc(lyrics.content) : [];
+  const currentLine = timedLines.reduce((found, line, index) => line.time <= player.position ? index : found, -1);
+  useEffect(() => {
+    if (currentLine < 0) return;
+    lyricsScroll.current?.scrollTo({ y: Math.max(0, currentLine * 38 - 100), animated: true });
+  }, [currentLine, active?.id]);
   if (!active) return null;
   const artworkSize = Math.min(width - 56, 350);
   const progress = player.duration > 0 ? Math.min(1, player.position / player.duration) : 0;
@@ -69,9 +87,9 @@ export function MiniPlayer() {
             onCommit={value => { void player.seek(value).finally(() => setPreview(null)); }} />
           <View style={styles.times}><Text style={styles.time}>{time(displayPosition)}</Text><Text style={styles.time}>{time(player.duration)}</Text></View>
           <View style={styles.transport}>
-            <Pressable onPress={() => void player.seek(0)} style={styles.control} accessibilityRole="button" accessibilityLabel="Restart song">
-              <Ionicons name="refresh-outline" size={25} color={colors.muted} />
-            </Pressable>
+            {player.queueControls ? <Pressable onPress={() => void player.toggleShuffle()} style={styles.control} accessibilityRole="button" accessibilityLabel={player.shuffle ? "Turn shuffle off" : "Turn shuffle on"}>
+              <Ionicons name="shuffle" size={25} color={player.shuffle ? colors.softRed : colors.muted} />
+            </Pressable> : <View style={styles.control} />}
             <Pressable onPress={() => void player.previous()} style={styles.control} accessibilityRole="button" accessibilityLabel="Previous song">
               <Ionicons name="play-skip-back" size={34} color={colors.text} />
             </Pressable>
@@ -81,18 +99,34 @@ export function MiniPlayer() {
             <Pressable onPress={() => void player.next()} style={styles.control} accessibilityRole="button" accessibilityLabel="Next song">
               <Ionicons name="play-skip-forward" size={34} color={colors.text} />
             </Pressable>
-            <View style={styles.control} />
-          </View>
-          <View style={styles.volume}>
-            <Ionicons name="volume-low" size={22} color={colors.muted} />
-            <View style={styles.volumeSlider}><SeekBar value={player.volume} maximum={1} label="Volume" valueText={`${Math.round(player.volume * 100)} percent`} step={0.05} onCommit={value => void player.setVolume(value)} /></View>
-            <Ionicons name="volume-high" size={22} color={colors.muted} />
+            <Pressable onPress={() => void player.toggleRepeat()} style={styles.control} accessibilityRole="button" accessibilityLabel={player.repeat ? "Turn song repeat off" : "Repeat this song"}>
+              <Ionicons name="repeat" size={25} color={player.repeat ? colors.softRed : colors.muted} />
+            </Pressable>
           </View>
           <Text style={styles.hint}>Drag the timeline or tap it to jump to any moment.</Text>
+          <View style={styles.lyricsCard}>
+            <View style={styles.lyricsHeader}><Text style={styles.lyricsTitle}>Lyrics</Text>{lyrics?.type === "timed" ? <Text style={styles.syncedBadge}>SYNCED</Text> : null}</View>
+            {lyricsLoading ? <ActivityIndicator color={colors.softRed} /> : lyrics?.type === "plain" ? <Text style={styles.plainLyrics}>{lyrics.content}</Text> : timedLines.length ? <ScrollView ref={lyricsScroll} style={styles.lyricsScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+              {timedLines.map((line, index) => <Text key={`${line.time}:${index}`} style={[styles.lyricLine, index === currentLine ? styles.lyricActive : null]}>{line.text || "♪"}</Text>)}
+            </ScrollView> : <Text style={styles.noLyrics}>Lyrics have not been added for this song yet.</Text>}
+          </View>
         </ScrollView>
       </LinearGradient>
     </Modal>
   </>;
+}
+
+function parseLrc(content: string) {
+  const lines: { time: number; text: string }[] = [];
+  for (const row of content.split(/\r?\n/)) {
+    const tags = [...row.matchAll(/\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g)];
+    const text = row.replace(/\[[^\]]+\]/g, "").trim();
+    for (const tag of tags) {
+      const fraction = tag[3] ? Number(`0.${tag[3].padEnd(3, "0").slice(0, 3)}`) : 0;
+      lines.push({ time: Number(tag[1]) * 60 + Number(tag[2]) + fraction, text });
+    }
+  }
+  return lines.sort((a, b) => a.time - b.time);
 }
 
 type SeekBarProps = {
@@ -154,7 +188,7 @@ const styles = StyleSheet.create({
   summary: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8, minHeight: 56 },
   art: { width: 46, height: 46, borderRadius: 8 },
   fallback: { backgroundColor: colors.raised, alignItems: "center", justifyContent: "center" },
-  songText: { flex: 1 }, title: { color: colors.text, fontWeight: "800" },
+  songText: { flex: 1 }, title: { color: colors.softRed, fontWeight: "800" },
   artist: { color: colors.muted, fontSize: 12, marginTop: 3 },
   miniControl: { width: 44, height: 48, alignItems: "center", justifyContent: "center" },
   miniProgress: { position: "absolute", left: 0, right: 0, bottom: 0, height: 3, backgroundColor: "#484C53" },
@@ -167,7 +201,7 @@ const styles = StyleSheet.create({
   control: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
   largeArt: { alignSelf: "center", borderRadius: 18, backgroundColor: "#1B1D21", alignItems: "center", justifyContent: "center", overflow: "hidden", marginBottom: 28 },
   artImage: { width: "100%", height: "100%" },
-  trackInfo: { marginBottom: 16 }, largeTitle: { color: colors.text, fontSize: 25, fontWeight: "800" },
+  trackInfo: { marginBottom: 16 }, largeTitle: { color: colors.softRed, fontSize: 25, fontWeight: "800" },
   largeArtist: { color: colors.muted, fontSize: 16, marginTop: 7 },
   seekTouch: { height: 44, justifyContent: "center" },
   seekTrack: { height: 5, borderRadius: 4, backgroundColor: "#454950" },
@@ -178,8 +212,14 @@ const styles = StyleSheet.create({
   time: { color: colors.muted, fontSize: 12, fontVariant: ["tabular-nums"] },
   transport: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginVertical: 22 },
   playButton: { width: 76, height: 76, borderRadius: 38, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
-  volume: { flexDirection: "row", alignItems: "center", gap: 18 },
-  volumeSlider: { flex: 1 }, hint: { color: colors.muted, fontSize: 12, textAlign: "center", marginTop: 12 },
+  hint: { color: colors.muted, fontSize: 12, textAlign: "center", marginTop: 2 },
+  lyricsCard: { marginTop: 34, borderRadius: 20, backgroundColor: "#17191DEB", borderWidth: 1, borderColor: colors.border, padding: 18, minHeight: 180 },
+  lyricsHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
+  lyricsTitle: { color: colors.text, fontSize: 22, fontWeight: "900" },
+  syncedBadge: { color: colors.softRed, borderColor: colors.softRed, borderWidth: 1, borderRadius: 99, fontSize: 10, fontWeight: "900", paddingHorizontal: 8, paddingVertical: 4 },
+  lyricsScroll: { maxHeight: 320 }, plainLyrics: { color: colors.text, fontSize: 18, lineHeight: 30 },
+  lyricLine: { color: "#7D8087", fontSize: 19, fontWeight: "700", lineHeight: 30, paddingVertical: 4 },
+  lyricActive: { color: colors.softRed, fontSize: 21 }, noLyrics: { color: colors.muted, fontSize: 15, lineHeight: 22 },
   errorText: { color: "#FFA9A3" }, errorBox: { color: "#FFA9A3", backgroundColor: "#3B2121", padding: 12, borderRadius: 10, fontSize: 13, marginBottom: 8 },
   status: { color: colors.muted, fontSize: 12, marginBottom: 5 }
 });

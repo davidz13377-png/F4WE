@@ -8,7 +8,7 @@ type LibraryValue = {
   favorites: Song[]; playlists: Playlist[]; recent: HistoryEntry[]; loading: boolean; error: string;
   refresh(): Promise<void>; toggleFavorite(song: Song): Promise<void>; isFavorite(song: Song): boolean;
   toggleSaved(playlist: Playlist): Promise<void>; selectedSong: Song | null; choosePlaylist(song: Song): void; closePicker(): void;
-  recordPlayed(musicId: string): void; forgetSong(musicId: string): Promise<void>;
+  recordPlayed(musicId: string): Promise<string | null>; forgetSong(musicId: string): Promise<void>;
 };
 const Context = createContext<LibraryValue | null>(null);
 export function LibraryProvider({ children }: PropsWithChildren) {
@@ -71,9 +71,12 @@ export function LibraryProvider({ children }: PropsWithChildren) {
     if (!userId) return;
     void historyFor(userId, entry).then(items => { if (currentUser.current === userId) setRecent(items); }).catch(() => undefined);
   }, [userId]);
-  const recordPlayed = useCallback((musicId: string) => {
+  const recordPlayed = useCallback(async (musicId: string) => {
     record({ kind: "song", musicId, at: Date.now() });
-    void api(`/api/music/${encodeURIComponent(musicId)}/play`, { method: "POST" }).catch(() => undefined);
+    try {
+      const result = await api<{ id: string }>(`/api/music/${encodeURIComponent(musicId)}/play`, { method: "POST" });
+      return result.id;
+    } catch { return null; }
   }, [record]);
   const forgetSong = async (musicId: string) => {
     favoritesRef.current = favoritesRef.current.filter(song => song.id !== musicId); setFavorites(favoritesRef.current);

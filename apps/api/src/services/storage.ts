@@ -89,7 +89,7 @@ export async function beginDirectUpload(category: DirectUploadCategory, userId: 
   return { uploadUrl, uploadToken, contentType: rules.contentType, expiresIn: DIRECT_UPLOAD_TTL_SECONDS };
 }
 
-export function completeDirectUpload(category: "music", userId: string, uploadToken: string): Promise<{ key: string; reference: string; mimeType: string; size: number }>;
+export function completeDirectUpload(category: "music", userId: string, uploadToken: string): Promise<{ key: string; reference: string; mimeType: string; size: number; duration: number | null }>;
 export function completeDirectUpload(category: ImageCategory, userId: string, uploadToken: string): Promise<{ key: string; url: string; mimeType: string; size: number }>;
 export async function completeDirectUpload(category: DirectUploadCategory, userId: string, uploadToken: string) {
   if (!useR2 || !s3) throw requestError(503, "Direct uploads require R2 storage");
@@ -127,7 +127,11 @@ export async function completeDirectUpload(category: DirectUploadCategory, userI
     await removeInvalid();
     throw requestError(415, category === "music" ? "Only valid MP3 files are accepted" : "Use a JPG, PNG, or WebP image");
   }
-  if (category === "music") return { key: token.key, reference: r2Reference(token.key), mimeType: detected!.mime, size };
+  if (category === "music") {
+    const full = await s3.send(new GetObjectCommand({ Bucket: env.R2_BUCKET!, Key: token.key }));
+    const duration = full.Body ? mp3DurationSeconds(await responseBytes(full.Body)) : null;
+    return { key: token.key, reference: r2Reference(token.key), mimeType: detected!.mime, size, duration };
+  }
   return { key: token.key, url: imageUrl(token.key), mimeType: detected!.mime, size };
 }
 
@@ -194,6 +198,32 @@ export async function saveMusic(buffer: Buffer) {
   const filePath = path.resolve(env.UPLOAD_DIR, filename);
   await fs.writeFile(filePath, buffer, { flag: "wx" });
   return filePath;
+}
+
+// Reads Layer III frame headers instead of trusting the filename or embedded
+// metadata. This works for both constant and variable bitrate MP3 files.
+export function mp3DurationSeconds(buffer: Buffer) {
+  let offset = 0, frames = 0, seconds = 0;
+  if (buffer.length >= 10 && buffer.toString("ascii", 0, 3) === "ID3") {
+    const size = ((buffer.readUInt8(6) & 0x7f) << 21) | ((buffer.readUInt8(7) & 0x7f) << 14) | ((buffer.readUInt8(8) & 0x7f) << 7) | (buffer.readUInt8(9) & 0x7f);
+    offset = 10 + size;
+  }
+  const mpeg1Bitrates = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+  const mpeg2Bitrates = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+  const baseRates = [44100, 48000, 32000];
+  while (offset + 4 <= buffer.length) {
+    const header = buffer.readUInt32BE(offset);
+    if ((header & 0xffe00000) !== 0xffe00000) { offset++; continue; }
+    const versionBits = (header >>> 19) & 3, layerBits = (header >>> 17) & 3, bitrateIndex = (header >>> 12) & 15, rateIndex = (header >>> 10) & 3;
+    if (versionBits === 1 || layerBits !== 1 || !bitrateIndex || bitrateIndex === 15 || rateIndex === 3) { offset++; continue; }
+    const divisor = versionBits === 3 ? 1 : versionBits === 2 ? 2 : 4;
+    const sampleRate = baseRates[rateIndex]! / divisor;
+    const bitrate = (versionBits === 3 ? mpeg1Bitrates : mpeg2Bitrates)[bitrateIndex]! * 1000;
+    const padding = (header >>> 9) & 1, frameLength = Math.floor((versionBits === 3 ? 144 : 72) * bitrate / sampleRate) + padding;
+    if (frameLength < 24 || offset + frameLength > buffer.length + 2) { offset++; continue; }
+    seconds += (versionBits === 3 ? 1152 : 576) / sampleRate; frames++; offset += frameLength;
+  }
+  return frames >= 2 && seconds > 0 ? Math.max(1, Math.round(seconds)) : null;
 }
 
 export async function deleteMusic(reference: string) {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { useFocusEffect } from "expo-router";
-import { ActivityIndicator, Text } from "react-native";
+import { router, useFocusEffect } from "expo-router";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { SongRow } from "../../src/components/SongRow";
 import { PlaylistRow } from "../../src/components/PlaylistRow";
 import { Empty, Input, Screen, Title, ui } from "../../src/components/UI";
@@ -33,7 +34,7 @@ export default function Search() {
     return () => { live = false; clearTimeout(timer); };
   }, [query, revision]);
   const recentQueue = library.recent.flatMap(item => recentSongs.filter(song => song.id === item.musicId));
-  return <Screen><Title subtitle="Find songs, artists and community playlists in F4WE.">Search</Title>
+  return <Screen><View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}><View style={{ flex: 1 }}><Title subtitle="Find songs, artists and community playlists in F4WE.">Search</Title></View><Pressable onPress={() => router.push("/friends" as any)} accessibilityRole="button" accessibilityLabel="Open friends" style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" }}><Ionicons name="people" size={23} color={colors.softRed} /></Pressable></View>
     <Input value={query} maxLength={100} onChangeText={setQuery} placeholder="Songs, artists or playlists" returnKeyType="search" />
     {error ? <Text accessibilityRole="alert" style={{ color: colors.red }}>{error}</Text> : null}
     {!query.trim() ? <>

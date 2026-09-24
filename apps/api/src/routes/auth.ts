@@ -31,7 +31,7 @@ router.post("/register", asyncRoute(async (req, res) => {
     if (!key || key.used || key.usedCount >= key.usageLimit) throw Object.assign(new Error("Invalid or fully used access key"), { status: 400 });
     const created = await tx.user.create({
       data: { id, username: input.username, passwordHash, accessKeyUsed: input.accessKey },
-      select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, registrationDate: true }
+      select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, registrationDate: true, shareListening: true }
     });
     const nextCount = key.usedCount + 1;
     await tx.accessKey.update({ where: { key: input.accessKey }, data: {
@@ -50,7 +50,7 @@ router.post("/login", asyncRoute(async (req, res) => {
   if (!user || !(await bcrypt.compare(input.password, user.passwordHash))) return res.status(401).json({ error: "Invalid username or password" });
   res.json({
     token: signToken(user.id, user.rank),
-    user: { id: user.id, username: user.username, rank: user.rank, isOwner: user.isOwner, profilePicture: user.profilePicture, registrationDate: user.registrationDate }
+    user: { id: user.id, username: user.username, rank: user.rank, isOwner: user.isOwner, profilePicture: user.profilePicture, registrationDate: user.registrationDate, shareListening: user.shareListening }
   });
 }));
 

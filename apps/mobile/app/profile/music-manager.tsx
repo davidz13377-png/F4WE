@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
+import { File } from "expo-file-system";
 import { useCallback, useState } from "react";
 import { Redirect, useFocusEffect } from "expo-router";
 import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
@@ -18,6 +20,7 @@ export default function MusicManager() {
   const { user, loading } = useAuth(), library = useLibrary(), player = usePlayer();
   const insets = useSafeAreaInsets();
   const [editing, setEditing] = useState<Song | null>(null), [title, setTitle] = useState(""), [artist, setArtist] = useState("");
+  const [lyricsFile, setLyricsFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null), [lyricsType, setLyricsType] = useState<"timed" | "plain">("timed");
   const [songs, setSongs] = useState<Song[]>([]), [query, setQuery] = useState(""), [busy, setBusy] = useState<string | null>(null), [error, setError] = useState("");
   const canDelete = !!user?.isOwner || user?.rank === "Admin" || user?.rank === "Developer";
   const allowed = !!user?.isOwner || user?.rank === "Moderator" || canDelete;
@@ -29,7 +32,7 @@ export default function MusicManager() {
   useFocusEffect(useCallback(() => { const timer = setTimeout(() => void load(), 300); return () => clearTimeout(timer); }, [load]));
   if (loading) return <Screen><ActivityIndicator color={colors.accent} /></Screen>;
   if (!allowed) return <Redirect href="/(tabs)/profile" />;
-  const edit = (song: Song) => { if (busy) return; setEditing(song); setTitle(song.title); setArtist(song.artist || ""); };
+  const edit = (song: Song) => { if (busy) return; setEditing(song); setTitle(song.title); setArtist(song.artist || ""); setLyricsFile(null); setLyricsType(song.lyricsSynced ? "timed" : "plain"); };
   const save = async () => {
     if (!editing || busy) return;
     if (!title.trim()) return Alert.alert("Title required", "Enter a song title.");
@@ -73,6 +76,34 @@ export default function MusicManager() {
     } catch (e) { Alert.alert("Could not change artwork", e instanceof Error ? e.message : "Try again"); }
     finally { setBusy(null); }
   };
+  const chooseLyrics = async () => {
+    const result = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true });
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0], expected = lyricsType === "timed" ? ".lrc" : ".txt";
+    if (!asset.name.toLowerCase().endsWith(expected)) return Alert.alert("Wrong lyrics file", `Choose a ${expected} file for this mode.`);
+    if (asset.size && asset.size > 100_000) return Alert.alert("Lyrics file too large", "The maximum size is 100 KB.");
+    setLyricsFile(asset);
+  };
+  const saveLyrics = async () => {
+    if (!editing || !lyricsFile || busy) return;
+    setBusy(editing.id);
+    try {
+      const content = await new File(lyricsFile.uri).text();
+      await api(`/api/music/${encodeURIComponent(editing.id)}/lyrics`, { method: "PUT", body: JSON.stringify({ type: lyricsType, content }) });
+      const updated = { ...editing, hasLyrics: true, lyricsSynced: lyricsType === "timed" };
+      setEditing(updated); setSongs(items => items.map(item => item.id === updated.id ? updated : item)); setLyricsFile(null);
+      Alert.alert("Lyrics saved", lyricsType === "timed" ? "Synced LRC lyrics are ready in the player." : "Plain lyrics are ready in the player.");
+    } catch (e) { Alert.alert("Could not save lyrics", e instanceof Error ? e.message : "Try again"); }
+    finally { setBusy(null); }
+  };
+  const removeLyrics = () => {
+    if (!editing || busy) return;
+    Alert.alert("Remove lyrics?", undefined, [{ text: "Cancel" }, { text: "Remove", style: "destructive", onPress: () => {
+      setBusy(editing.id); void api(`/api/music/${encodeURIComponent(editing.id)}/lyrics`, { method: "DELETE" }).then(() => {
+        const updated = { ...editing, hasLyrics: false, lyricsSynced: false }; setEditing(updated); setSongs(items => items.map(item => item.id === updated.id ? updated : item)); setLyricsFile(null);
+      }).catch(e => Alert.alert("Could not remove lyrics", e.message)).finally(() => setBusy(null));
+    } }]);
+  };
   return <Screen><Title subtitle="Moderator / Admin / Developer: edit song details and artwork.">Music Manager</Title><Input placeholder="Search songs or artists" maxLength={100} value={query} onChangeText={setQuery} />
     {error ? <Text style={{ color: colors.red }}>{error}</Text> : null}
     {songs.map(song => <View key={song.id} style={[ui.row, { justifyContent: "space-between", gap: 14, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border }]}>
@@ -89,6 +120,11 @@ export default function MusicManager() {
             {editing?.artworkUrl ? <View style={{ marginTop: 8 }}><Button title="Remove artwork" tone="dark" loading={!!busy} onPress={() => void changePicture(true)} /></View> : null}
             <Text style={ui.label}>Title</Text><Input accessibilityLabel="Song title" value={title} maxLength={150} onChangeText={setTitle} editable={!busy} placeholder="Song title" />
             <Text style={ui.label}>Artist</Text><Input accessibilityLabel="Artist" value={artist} maxLength={150} onChangeText={setArtist} editable={!busy} placeholder="Artist (optional)" />
+            <Text style={[ui.label, { marginTop: 6 }]}>Lyrics {editing?.hasLyrics ? "• added" : "• not added yet"}</Text>
+            <View style={{ flexDirection: "row", backgroundColor: colors.raised, borderRadius: 14, padding: 4, marginBottom: 10 }}><LyricsMode label="Timed .lrc" selected={lyricsType === "timed"} onPress={() => { setLyricsType("timed"); setLyricsFile(null); }} /><LyricsMode label="Plain .txt" selected={lyricsType === "plain"} onPress={() => { setLyricsType("plain"); setLyricsFile(null); }} /></View>
+            <Button title={lyricsFile?.name || `Choose ${lyricsType === "timed" ? ".lrc" : ".txt"} file`} icon="document-text-outline" tone="dark" loading={!!busy} onPress={() => void chooseLyrics()} />
+            {lyricsFile ? <View style={{ marginTop: 8 }}><Button title="Save lyrics" icon="checkmark" loading={!!busy} onPress={() => void saveLyrics()} /></View> : null}
+            {editing?.hasLyrics ? <View style={{ marginTop: 8, marginBottom: 12 }}><Button title="Remove lyrics" tone="dark" loading={!!busy} onPress={removeLyrics} /></View> : <View style={{ height: 12 }} />}
             <Button title="Save changes" loading={!!busy} onPress={() => void save()} /><View style={{ height: 10 }} />
             <Button title="Cancel" tone="dark" loading={!!busy} onPress={() => setEditing(null)} />
           </ScrollView>
@@ -98,3 +134,4 @@ export default function MusicManager() {
   </Screen>;
 }
 function ImagePickerPreview({ uri }: { uri: string }) { return <View style={{ alignItems: "center", marginBottom: 12 }}><Image source={{ uri }} style={{ width: 120, height: 120, borderRadius: 12 }} /></View>; }
+function LyricsMode({ label, selected, onPress }: { label: string; selected: boolean; onPress(): void }) { return <Pressable onPress={onPress} style={{ flex: 1, minHeight: 42, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: selected ? colors.text : "transparent" }}><Text style={{ color: selected ? colors.background : colors.muted, fontWeight: "800" }}>{label}</Text></Pressable>; }

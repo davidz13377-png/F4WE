@@ -2,14 +2,14 @@ import { Ionicons } from "@expo/vector-icons";
 import { useActiveTrack } from "react-native-track-player";
 import { useCallback, useState } from "react";
 import { router, useFocusEffect } from "expo-router";
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SongRow } from "../../src/components/SongRow";
 import { Card, Empty, OwnerBadge, RankBadge, Screen, Title, ui } from "../../src/components/UI";
 import { useLibrary } from "../../src/context/LibraryContext";
 import { api } from "../../src/lib/api";
 import { colors, rankColor } from "../../src/lib/theme";
-import { profilePictureUrl } from "../../src/lib/media";
 import type { RotationSong, User } from "../../src/types";
+import { ProfilePicture } from "../../src/components/ProfilePicture";
 
 function AnimatedWordmark() {
   const [text, setText] = useState("F");
@@ -48,7 +48,7 @@ export default function Home() {
     {songs.length ? songs.map(song => <SongRow key={song.id} song={song} queue={songs} />) : <Empty label="Play some music to build your weekly rotation" />}
     <Text style={ui.section}>Staff Team</Text>
     {staff.length ? staff.map(member => <Card key={member.id}><View style={[ui.row, { gap: 14 }]}>
-      {member.profilePicture ? <Image source={{ uri: profilePictureUrl(member.profilePicture) }} style={styles.avatar} /> : <View style={[styles.avatar, { backgroundColor: colors.raised, justifyContent: "center", alignItems: "center" }]}><Text style={{ color: colors.text, fontSize: 22, fontWeight: "600" }}>{member.username[0]?.toUpperCase()}</Text></View>}
+      <ProfilePicture user={member} size={52} />
       <View style={{ flex: 1 }}><Text style={[ui.body, { fontWeight: "500", fontSize: 17, marginBottom: 7 }]}>{member.username}</Text><View style={[ui.row, { gap: 6, flexWrap: "wrap" }]}>{member.isOwner ? <OwnerBadge /> : null}<RankBadge rank={member.rank} /></View></View>
       <Ionicons name={member.rank === "Developer" ? "code-slash" : "shield-checkmark"} size={24} color={member.isOwner ? colors.gold : rankColor[member.rank]} />
     </View></Card>) : <Empty label="No staff members yet" />}
@@ -58,5 +58,4 @@ const styles = StyleSheet.create({
   logo: { color: colors.accent, fontSize: 25, fontWeight: "900", letterSpacing: 3, minWidth: 105 },
   cursor: { color: colors.accent, fontWeight: "400" },
   updates: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 99, paddingHorizontal: 18, paddingVertical: 12, backgroundColor: colors.raised, borderWidth: 1, borderColor: colors.border },
-  avatar: { width: 52, height: 52, borderRadius: 26 }
 });

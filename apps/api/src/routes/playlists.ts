@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import multer from "multer";
 import { fileTypeFromBuffer } from "file-type";
+import { Rank } from "@prisma/client";
 import { prisma } from "../db.js";
 import { authenticate } from "../middleware/auth.js";
 import { asyncRoute } from "../middleware/errors.js";
@@ -14,20 +15,21 @@ const directUploadRequest = z.object({ mimeType: z.string().min(1).max(100), siz
 const directUploadCompletion = z.object({ uploadToken: z.string().min(1).max(5000) }).strict();
 router.use(authenticate);
 const input = z.object({ name: z.string().trim().min(1).max(100), description: z.string().trim().max(500).optional(), isPublic: z.boolean().default(false) });
-const accessible = (userId: string) => ({ OR: [{ isPublic: true }, { creatorId: userId }] });
+const accessible = (userId: string, seePrivate = false) => seePrivate ? {} : ({ OR: [{ isPublic: true }, { creatorId: userId }] });
 const creator = { select: { id: true, username: true, rank: true } } as const;
 
 router.get("/", asyncRoute(async (req, res) => {
   const userId = req.auth!.userId;
+  const seePrivate = req.auth!.isOwner || req.auth!.rank === Rank.Developer;
   const q = z.string().trim().max(100).parse(req.query.q ?? "");
   const rows = await prisma.album.findMany({
-    where: { AND: [accessible(userId), ...(req.query.mine === "true" ? [{ creatorId: userId }] : []),
+    where: { AND: [accessible(userId, seePrivate), ...(req.query.mine === "true" ? [{ creatorId: userId }] : []),
       ...(req.query.library === "true" ? [{ OR: [{ creatorId: userId }, { savedBy: { some: { userId } } }] }] : []),
       ...(q ? [{ name: { contains: q, mode: "insensitive" as const } }] : [])] },
     orderBy: { creationDate: "desc" },
-    include: { creator, _count: { select: { songs: true } }, savedBy: { where: { userId }, select: { userId: true } } }
+    include: { creator, songs: { select: { music: { select: { duration: true } } } }, _count: { select: { songs: true } }, savedBy: { where: { userId }, select: { userId: true } } }
   });
-  res.json(rows.map(({ savedBy, _count, ...playlist }) => ({ ...playlist, trackCount: _count.songs, saved: !!savedBy.length })));
+  res.json(rows.map(({ savedBy, songs, _count, ...playlist }) => ({ ...playlist, trackCount: _count.songs, totalDuration: songs.reduce((sum, item) => sum + (item.music.duration ?? 0), 0), saved: !!savedBy.length })));
 }));
 
 router.post("/", asyncRoute(async (req, res) => {
@@ -46,14 +48,15 @@ router.patch("/:id", asyncRoute(async (req, res) => {
 
 router.get("/:id", asyncRoute(async (req, res) => {
   const userId = req.auth!.userId;
+  const seePrivate = req.auth!.isOwner || req.auth!.rank === Rank.Developer;
   const playlist = await prisma.album.findFirst({
-    where: { id: req.params.id as string, ...accessible(userId) },
+    where: { id: req.params.id as string, ...accessible(userId, seePrivate) },
     include: { creator, savedBy: { where: { userId }, select: { userId: true } },
       songs: { orderBy: [{ order: "asc" }, { musicId: "asc" }], include: { music: { include: { favorites: { where: { userId }, select: { userId: true } } } } } } }
   });
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
   const { savedBy, songs, ...details } = playlist;
-  res.json({ ...details, saved: !!savedBy.length, trackCount: songs.length, songs: songs.map(item => songView(item.music)) });
+  res.json({ ...details, saved: !!savedBy.length, trackCount: songs.length, totalDuration: songs.reduce((sum, item) => sum + (item.music.duration ?? 0), 0), songs: songs.map(item => songView(item.music)) });
 }));
 
 router.post("/:id/picture/upload-url", asyncRoute(async (req, res) => {
@@ -134,7 +137,8 @@ router.delete("/:id/songs/:musicId", asyncRoute(async (req, res) => {
 
 router.post("/:id/save", asyncRoute(async (req, res) => {
   const userId = req.auth!.userId, albumId = req.params.id as string;
-  if (!await prisma.album.findFirst({ where: { id: albumId, ...accessible(userId) }, select: { id: true } })) return res.status(404).json({ error: "Playlist not found" });
+  const seePrivate = req.auth!.isOwner || req.auth!.rank === Rank.Developer;
+  if (!await prisma.album.findFirst({ where: { id: albumId, ...accessible(userId, seePrivate) }, select: { id: true } })) return res.status(404).json({ error: "Playlist not found" });
   await prisma.savedAlbum.upsert({ where: { userId_albumId: { userId, albumId } }, create: { userId, albumId }, update: {} });
   res.status(204).end();
 }));

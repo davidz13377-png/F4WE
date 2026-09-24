@@ -24,6 +24,7 @@ export default function RootLayout() {
     <Stack.Screen name="profile/uploader" options={{ title: "Music Uploader" }} />
     <Stack.Screen name="profile/music-manager" options={{ title: "Music Manager" }} />
     <Stack.Screen name="favorites" options={{ title: "Favorites" }} />
+    <Stack.Screen name="friends" options={{ title: "Friends" }} />
     <Stack.Screen name="playlist/[id]" options={{ title: "Playlist" }} />
   </Stack><SessionPlayer /><F4WEAlertHost /></PlayerProvider></LibraryProvider></AuthProvider>;
 }

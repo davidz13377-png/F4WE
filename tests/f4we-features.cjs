@@ -318,15 +318,15 @@ async function main() {
   console.log("PASS: mobile obtains a signed URL, uploads bytes straight to R2, then completes through the authenticated API.");
   let permission = true, oversized = false, uploads = 0, refreshed = 0, permissionCalls = 0; const alerts = [], platform = { OS: "android" };
   const profile = load("apps/mobile/app/(tabs)/profile.tsx", {
-    react: { useState: value => [value, () => {}], useRef: value => ({ current: value }) }, "react/jsx-runtime": { jsx, jsxs: jsx },
+    react: { useState: value => [value, () => {}], useRef: value => ({ current: value }), useEffect: () => {} }, "react/jsx-runtime": { jsx, jsxs: jsx },
     "@expo/vector-icons": { Ionicons: "Icon" }, "expo-clipboard": { setStringAsync: async () => {} }, "expo-router": { router: {} },
     "expo-image-picker": { requestMediaLibraryPermissionsAsync: async () => { permissionCalls++; return { granted: permission }; }, launchImageLibraryAsync: async () => ({ canceled: false, assets: [{ uri: "file:///cache/avatar.png", fileName: "avatar.png", mimeType: "image/png", fileSize: oversized ? 6 * 1024 * 1024 : 3 }] }) },
     "react-native": { Platform: platform, ActivityIndicator: "Spinner", Alert: { alert: (...args) => alerts.push(args) }, Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { create: s => s } },
     "../../src/components/F4WEAlert": { F4WEAlert: { alert: (...args) => alerts.push(args) } },
     "../../src/components/UI": { Button: "Button", Card: "Card", RankBadge: "Badge", OwnerBadge: "OwnerBadge", Screen: "Screen", Title: "Title", ui: {} },
     "../../src/context/AuthContext": { useAuth: () => ({ user: owner, refresh: async () => refreshed++, logout: async () => {} }) },
-    "../../src/lib/theme": { colors: {} }, "../../src/lib/media": media,
-    "../../src/lib/api": { uploadFile: async (route, file) => { assert.equal(route, "/api/profile/me/picture"); assert.equal(file.uri, "file:///cache/avatar.png"); assert.equal(file.name, "avatar.png"); assert.equal(file.type, "image/png"); assert.equal(file.size, 3); uploads++; } }
+    "../../src/lib/theme": { colors: {} }, "../../src/lib/media": media, "../../src/lib/time": { fullDuration: value => String(value) },
+    "../../src/lib/api": { api: async () => ({}), uploadFile: async (route, file) => { assert.equal(route, "/api/profile/me/picture"); assert.equal(file.uri, "file:///cache/avatar.png"); assert.equal(file.name, "avatar.png"); assert.equal(file.type, "image/png"); assert.equal(file.size, 3); uploads++; } }
   });
   function find(node, predicate) {
     if (!node) return undefined;

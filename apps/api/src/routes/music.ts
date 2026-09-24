@@ -9,7 +9,7 @@ import { authenticate, requireRank } from "../middleware/auth.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { audit } from "../services/logging.js";
 import { songView } from "../services/catalog.js";
-import { beginDirectUpload, completeDirectUpload, deleteImage, deleteMusic, openMusic, saveImage, saveMusic, storedMusicName } from "../services/storage.js";
+import { beginDirectUpload, completeDirectUpload, deleteImage, deleteMusic, mp3DurationSeconds, openMusic, saveImage, saveMusic, storedMusicName } from "../services/storage.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_MP3_MB * 1024 * 1024, files: 1 } });
@@ -121,6 +121,30 @@ router.delete("/:id/picture", requireRank(Rank.Moderator, Rank.Admin, Rank.Devel
   res.status(204).end();
 }));
 
+router.get("/:id/lyrics", asyncRoute(async (req, res) => {
+  const song = await prisma.music.findUnique({ where: { id: req.params.id as string }, select: { lyrics: true, lyricsSynced: true } });
+  if (!song) return res.status(404).json({ error: "Song not found" });
+  if (!song.lyrics) return res.status(404).json({ error: "Lyrics have not been added for this song yet" });
+  res.json({ content: song.lyrics, type: song.lyricsSynced ? "timed" : "plain" });
+}));
+
+router.put("/:id/lyrics", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
+  const input = z.object({ type: z.enum(["plain", "timed"]), content: z.string().trim().min(1).max(100_000) }).strict().parse(req.body);
+  if (input.type === "timed" && !/^\s*(?:\[[^\]]+\]\s*)*\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/m.test(input.content)) {
+    return res.status(400).json({ error: "The selected LRC file has no timed [mm:ss.xx] lyric lines" });
+  }
+  const result = await prisma.music.updateMany({ where: { id: req.params.id as string }, data: { lyrics: input.content, lyricsSynced: input.type === "timed" } });
+  if (!result.count) return res.status(404).json({ error: "Song not found" });
+  await audit("MUSIC_UPLOAD", req.auth!.userId, "music.lyrics_updated", { musicId: req.params.id, type: input.type });
+  res.json({ hasLyrics: true, type: input.type });
+}));
+
+router.delete("/:id/lyrics", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
+  const result = await prisma.music.updateMany({ where: { id: req.params.id as string }, data: { lyrics: null, lyricsSynced: false } });
+  if (!result.count) return res.status(404).json({ error: "Song not found" });
+  res.status(204).end();
+}));
+
 router.delete("/:id", requireRank(Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
   const song = await prisma.music.findUnique({ where: { id: req.params.id as string } });
   if (!song) return res.status(404).json({ error: "Song not found" });
@@ -147,7 +171,7 @@ router.post("/upload/complete", requireRank(Rank.Moderator, Rank.Admin, Rank.Dev
   const uploaded = await completeDirectUpload("music", req.auth!.userId, input.uploadToken);
   let song;
   try {
-    song = await prisma.music.create({ data: { title: input.title, artist: input.artist, artworkUrl: input.artworkUrl, filePath: uploaded.reference, mimeType: uploaded.mimeType, uploaderId: req.auth!.userId } });
+    song = await prisma.music.create({ data: { title: input.title, artist: input.artist, artworkUrl: input.artworkUrl, filePath: uploaded.reference, mimeType: uploaded.mimeType, duration: uploaded.duration, uploaderId: req.auth!.userId } });
   } catch (error) {
     await deleteMusic(uploaded.reference).catch(() => undefined);
     throw error;
@@ -164,7 +188,7 @@ router.post("/upload", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), 
   const filePath = await saveMusic(req.file.buffer);
   let song;
   try {
-    song = await prisma.music.create({ data: { ...meta, filePath, uploaderId: req.auth!.userId } });
+    song = await prisma.music.create({ data: { ...meta, filePath, duration: mp3DurationSeconds(req.file.buffer), uploaderId: req.auth!.userId } });
   } catch (error) {
     await deleteMusic(filePath).catch(() => undefined);
     throw error;
@@ -201,8 +225,24 @@ router.post("/:id/like", asyncRoute(async (req, res) => {
 router.post("/:id/play", asyncRoute(async (req, res) => {
   const musicId = req.params.id as string;
   if (!await prisma.music.findUnique({ where: { id: musicId }, select: { id: true } })) return res.status(404).json({ error: "Song not found" });
-  await prisma.musicPlay.create({ data: { userId: req.auth!.userId, musicId } });
+  const play = await prisma.musicPlay.create({ data: { userId: req.auth!.userId, musicId }, select: { id: true } });
+  res.status(201).json(play);
+}));
+
+router.patch("/:id/play/:playId", asyncRoute(async (req, res) => {
+  const seconds = z.object({ seconds: z.number().int().min(1).max(30) }).strict().parse(req.body).seconds;
+  const result = await prisma.musicPlay.updateMany({
+    where: { id: req.params.playId as string, musicId: req.params.id as string, userId: req.auth!.userId },
+    data: { listenedSeconds: { increment: seconds } }
+  });
+  if (!result.count) return res.status(404).json({ error: "Listening session not found" });
   res.status(204).end();
+}));
+
+router.patch("/:id/duration", asyncRoute(async (req, res) => {
+  const { duration } = z.object({ duration: z.number().int().min(1).max(24 * 60 * 60) }).strict().parse(req.body);
+  const result = await prisma.music.updateMany({ where: { id: req.params.id as string, duration: null }, data: { duration } });
+  res.status(result.count ? 204 : 200).end();
 }));
 
 router.delete("/:id/like", asyncRoute(async (req, res) => {

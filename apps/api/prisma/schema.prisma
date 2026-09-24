@@ -29,6 +29,7 @@ model User {
   rank              Rank               @default(Access)
   isOwner           Boolean            @default(false)
   profilePicture    String?
+  shareListening    Boolean            @default(false)
   registrationDate DateTime            @default(now())
   accessKeyUsed     String             @db.VarChar(64)
   accessKey         AccessKey           @relation(fields: [accessKeyUsed], references: [key])
@@ -44,6 +45,10 @@ model User {
   notifications     Notification[]
   rankChanges       UserRanksHistory[]  @relation("ChangedUser")
   rankChangesMade   UserRanksHistory[]  @relation("ChangedBy")
+  sentFriendRequests     FriendRequest[] @relation("SentFriendRequests")
+  receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
+  friendships            Friendship[]   @relation("FriendshipOwner")
+  friendedBy             Friendship[]   @relation("FriendshipTarget")
 }
 
 model AccessKey {
@@ -65,6 +70,8 @@ model Music {
   mimeType    String      @default("audio/mpeg")
   duration    Int?
   artworkUrl  String?
+  lyrics      String?
+  lyricsSynced Boolean   @default(false)
   uploaderId  String?     @db.Char(16)
   uploadDate  DateTime    @default(now())
   uploader    User?       @relation("Uploader", fields: [uploaderId], references: [id], onDelete: SetNull)
@@ -78,11 +85,35 @@ model MusicPlay {
   userId   String   @db.Char(16)
   musicId  String
   playedAt DateTime @default(now())
+  listenedSeconds Int @default(0)
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   music    Music    @relation(fields: [musicId], references: [id], onDelete: Cascade)
 
   @@index([userId, playedAt])
   @@index([musicId, playedAt])
+}
+
+model FriendRequest {
+  id         String   @id @default(cuid())
+  senderId   String   @db.Char(16)
+  receiverId String   @db.Char(16)
+  createdAt  DateTime @default(now())
+  sender     User     @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User     @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([receiverId, createdAt])
+}
+
+model Friendship {
+  userId    String   @db.Char(16)
+  friendId  String   @db.Char(16)
+  createdAt DateTime @default(now())
+  user      User     @relation("FriendshipOwner", fields: [userId], references: [id], onDelete: Cascade)
+  friend    User     @relation("FriendshipTarget", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@id([userId, friendId])
+  @@index([friendId])
 }
 
 model Album {

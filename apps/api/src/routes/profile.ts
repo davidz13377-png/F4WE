@@ -7,9 +7,10 @@ import { prisma } from "../db.js";
 import { authenticate, requireRank, signToken } from "../middleware/auth.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { audit } from "../services/logging.js";
-import { notifyUser } from "../services/realtime.js";
+import { notifyUser, publishListening } from "../services/realtime.js";
 import { beginDirectUpload, completeDirectUpload, deleteImage, saveImage } from "../services/storage.js";
 import { canonicalSpotifyTrackUrl, spotifyTrackMetadata } from "../services/spotify.js";
+import { songView } from "../services/catalog.js";
 
 const router = Router();
 const pictureUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -23,9 +24,44 @@ router.get("/staff-team", asyncRoute(async (_req, res) => {
 }));
 
 router.get("/me", asyncRoute(async (req, res) => {
-  const user = await prisma.user.findUnique({ where: { id: req.auth!.userId }, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, registrationDate: true } });
+  const user = await prisma.user.findUnique({ where: { id: req.auth!.userId }, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, registrationDate: true, shareListening: true } });
   if (!user) return res.status(404).json({ error: "User not found" });
   res.json({ user, refreshedToken: signToken(user.id, user.rank) });
+}));
+
+router.patch("/me/listening-privacy", asyncRoute(async (req, res) => {
+  const { shareListening } = z.object({ shareListening: z.boolean() }).strict().parse(req.body);
+  const user = await prisma.user.update({ where: { id: req.auth!.userId }, data: { shareListening }, select: { shareListening: true } });
+  if (!shareListening) publishListening(req.auth!.userId, null);
+  res.json(user);
+}));
+
+router.get("/me/listening-stats", asyncRoute(async (req, res) => {
+  const result = await prisma.musicPlay.aggregate({ where: { userId: req.auth!.userId }, _sum: { listenedSeconds: true }, _count: { id: true } });
+  res.json({ totalSeconds: result._sum.listenedSeconds ?? 0, playCount: result._count.id });
+}));
+
+router.get("/me/recap", asyncRoute(async (req, res) => {
+  const currentYear = new Date().getUTCFullYear();
+  const year = z.coerce.number().int().min(2020).max(currentYear).catch(currentYear).parse(req.query.year ?? currentYear);
+  const start = new Date(Date.UTC(year, 0, 1)), end = new Date(Date.UTC(year + 1, 0, 1));
+  const summary = await prisma.musicPlay.aggregate({
+    where: { userId: req.auth!.userId, playedAt: { gte: start, lt: end } },
+    _sum: { listenedSeconds: true }, _count: { id: true }
+  });
+  const grouped = await prisma.musicPlay.groupBy({
+    by: ["musicId"], where: { userId: req.auth!.userId, playedAt: { gte: start, lt: end } },
+    _sum: { listenedSeconds: true }, _count: { id: true }, orderBy: [{ _sum: { listenedSeconds: "desc" } }, { _count: { id: "desc" } }], take: 5
+  });
+  const songs = await prisma.music.findMany({ where: { id: { in: grouped.map(item => item.musicId) } } });
+  const byId = new Map(songs.map(song => [song.id, song]));
+  res.json({
+    year, totalSeconds: summary._sum.listenedSeconds ?? 0, playCount: summary._count.id,
+    topSongs: grouped.flatMap(item => {
+      const song = byId.get(item.musicId);
+      return song ? [{ ...songView(song), listenedSeconds: item._sum.listenedSeconds ?? 0, playCount: item._count.id }] : [];
+    })
+  });
 }));
 
 router.patch("/me", asyncRoute(async (req, res) => {
