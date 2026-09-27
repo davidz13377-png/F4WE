@@ -6,7 +6,7 @@ export function profilePictureUrl(value?: string | null): string | undefined {
   if (!value) return undefined;
   try {
     const url = new URL(value, API_URL);
-    if (url.pathname.startsWith("/media/profile/") || url.pathname.startsWith("/media/playlist/")) {
+    if (url.pathname.startsWith("/media/")) {
       return API_URL.replace(/\/+$/, "") + url.pathname + url.search;
     }
   } catch { return value; }

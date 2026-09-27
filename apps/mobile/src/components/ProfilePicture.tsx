@@ -1,19 +1,22 @@
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
+import { Image } from "expo-image";
 import { useState } from "react";
-import { Image, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import type { User } from "../types";
 import { profilePictureUrl } from "../lib/media";
 import { colors } from "../lib/theme";
 
-export function ProfilePicture({ user, size = 52 }: { user: Pick<User, "username" | "profilePicture">; size?: number }) {
+export function ProfilePicture({ user, size = 52, openProfile = true }: { user: Pick<User, "id" | "username" | "profilePicture" | "profileDesignUrl">; size?: number; openProfile?: boolean }) {
   const [open, setOpen] = useState(false), uri = profilePictureUrl(user.profilePicture);
-  const picture = uri ? <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} /> : <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.raised, alignItems: "center", justifyContent: "center" }}><Text style={{ color: colors.text, fontSize: size * .42, fontWeight: "800" }}>{user.username[0]?.toUpperCase()}</Text></View>;
+  const frame = profilePictureUrl(user.profileDesignUrl), frameSize = size * 1.3;
+  const picture = <View style={{ width: frameSize, height: frameSize, alignItems: "center", justifyContent: "center" }}>{uri ? <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} contentFit="cover" /> : <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.raised, alignItems: "center", justifyContent: "center" }}><Text style={{ color: colors.text, fontSize: size * .42, fontWeight: "800" }}>{user.username[0]?.toUpperCase()}</Text></View>}{frame ? <Image source={{ uri: frame }} style={{ position: "absolute", width: frameSize, height: frameSize }} contentFit="contain" /> : null}</View>;
   return <>
-    <Pressable accessibilityRole="imagebutton" accessibilityLabel={`Open ${user.username}'s profile picture`} onPress={() => setOpen(true)}>{picture}</Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel={`Open ${user.username}'s profile`} onPress={() => openProfile ? router.push(`/user/${encodeURIComponent(user.id)}` as any) : setOpen(true)}>{picture}</Pressable>
     <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
       <View style={styles.backdrop}><Pressable style={StyleSheet.absoluteFill} onPress={() => setOpen(false)} />
         <Text style={styles.name}>{user.username}</Text>
-        {uri ? <Image source={{ uri }} resizeMode="contain" style={styles.large} /> : <View style={[styles.large, styles.fallback]}><Text style={styles.initial}>{user.username[0]?.toUpperCase()}</Text></View>}
+        {uri ? <Image source={{ uri }} contentFit="contain" style={styles.large} /> : <View style={[styles.large, styles.fallback]}><Text style={styles.initial}>{user.username[0]?.toUpperCase()}</Text></View>}
         <Pressable onPress={() => setOpen(false)} style={styles.close} accessibilityRole="button" accessibilityLabel="Close profile picture"><Ionicons name="close" size={28} color={colors.text} /></Pressable>
       </View>
     </Modal>

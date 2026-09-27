@@ -41,13 +41,21 @@ export default function Uploader() {
     if (asset.size && asset.size > 100_000) return Alert.alert("Lyrics file too large", "The maximum size is 100 KB.");
     setLyricsFile(asset);
   };
-  const upload = async () => {
+  const upload = async (confirmDuplicate = false) => {
     if (!file) return Alert.alert("Choose an MP3 first");
     if (busy) return;
     try {
       setBusy(true);
       if (!title.trim()) throw new Error("Enter the song title.");
-      const song = await uploadFile<Song>("/api/music/upload", { uri: file.uri, name: file.name || "upload.mp3", type: file.mimeType || "audio/mpeg", size: file.size }, { title: title.trim(), ...(artist.trim() ? { artist: artist.trim() } : {}) });
+      if (!confirmDuplicate) {
+        const duplicate = await api<{ duplicate: { id: string; title: string; artist?: string | null } | null }>(`/api/music/duplicate?title=${encodeURIComponent(title.trim())}&artist=${encodeURIComponent(artist.trim())}`);
+        if (duplicate.duplicate) {
+          setBusy(false);
+          Alert.alert("This song already exists", `“${duplicate.duplicate.title}” by ${duplicate.duplicate.artist || "Unknown artist"} already exists. Are you sure you want to upload another copy?`, [{ text: "Cancel" }, { text: "Upload anyway", onPress: () => void upload(true) }]);
+          return;
+        }
+      }
+      const song = await uploadFile<Song>("/api/music/upload", { uri: file.uri, name: file.name || "upload.mp3", type: file.mimeType || "audio/mpeg", size: file.size }, { title: title.trim(), ...(artist.trim() ? { artist: artist.trim() } : {}), confirmDuplicate });
       const warnings: string[] = [];
       if (artwork) {
         try { await uploadFile(`/api/music/${encodeURIComponent(song.id)}/picture`, { uri: artwork.uri, name: artwork.fileName || "artwork.jpg", type: artwork.mimeType || "image/jpeg", size: artwork.fileSize }); }
@@ -71,7 +79,7 @@ export default function Uploader() {
     <Text style={ui.label}>Song artwork</Text><Pressable onPress={() => void chooseArtwork()}><Card><View style={{ alignItems: "center", paddingVertical: 10 }}>{artwork ? <Image source={{ uri: artwork.uri }} style={{ width: 130, height: 130, borderRadius: 14 }} /> : <><Text style={{ color: colors.softRed, fontSize: 30 }}>▧</Text><Text style={[ui.body, { fontWeight: "800", marginTop: 7 }]}>Choose image from phone</Text></>}</View></Card></Pressable>
     <Text style={ui.label}>Lyrics (optional)</Text><View style={{ flexDirection: "row", backgroundColor: colors.raised, borderRadius: 14, padding: 4, marginBottom: 10 }}><Mode label="Timed .lrc" selected={lyricsType === "timed"} onPress={() => { setLyricsType("timed"); setLyricsFile(null); }} /><Mode label="Plain .txt" selected={lyricsType === "plain"} onPress={() => { setLyricsType("plain"); setLyricsFile(null); }} /></View>
     <Button title={lyricsFile?.name || `Choose ${lyricsType === "timed" ? ".lrc" : ".txt"} file`} icon="document-text-outline" tone="dark" onPress={() => void chooseLyrics()} /><View style={{ height: 18 }} />
-    <Button title="Upload" icon="cloud-upload" loading={busy} onPress={() => void upload()} /></Screen>;
+    <Button title="Upload" icon="cloud-upload" loading={busy} onPress={() => void upload(false)} /></Screen>;
 }
 
 function PressableCard({ onPress, fileName }: { onPress(): void; fileName?: string }) { return <Pressable onPress={onPress}><Card><View style={{ alignItems: "center", paddingVertical: 22 }}><Text style={{ color: colors.accent, fontSize: 34 }}>♫</Text><Text style={[ui.body, { fontWeight: "800", marginTop: 8 }]}>{fileName || "Choose MP3 file"}</Text><Text style={[ui.muted, { marginTop: 5 }]}>Tap to browse</Text></View></Card></Pressable>; }

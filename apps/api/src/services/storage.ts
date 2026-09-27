@@ -8,10 +8,11 @@ import path from "node:path";
 import type { Readable } from "node:stream";
 import { env } from "../env.js";
 
-type ImageCategory = "profile" | "playlist" | "music-artwork";
+export type ImageCategory = "profile" | "banner" | "profile-design" | "playlist" | "music-artwork";
 export type DirectUploadCategory = ImageCategory | "music";
 
 const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+const ANIMATED_IMAGE_MIME_TYPES = ["image/gif"] as const;
 const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const DIRECT_UPLOAD_TTL_SECONDS = 10 * 60;
 const UPLOAD_TOKEN_ISSUER = "music-box-upload";
@@ -46,9 +47,12 @@ function uploadRules(category: DirectUploadCategory, contentType: string) {
     return { extension: "mp3", contentType: "audio/mpeg", maxBytes: Math.floor(env.MAX_MP3_MB * 1024 * 1024) };
   }
   const normalizedType = contentType.toLowerCase() === "image/jpg" ? "image/jpeg" : contentType.toLowerCase();
-  if (!(IMAGE_MIME_TYPES as readonly string[]).includes(normalizedType)) throw requestError(415, "Use a JPG, PNG, or WebP image");
-  const extensions: Record<(typeof IMAGE_MIME_TYPES)[number], string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
-  return { extension: extensions[normalizedType as (typeof IMAGE_MIME_TYPES)[number]], contentType: normalizedType, maxBytes: IMAGE_MAX_BYTES };
+  const acceptsGif = category === "profile" || category === "banner" || category === "profile-design";
+  if (!(IMAGE_MIME_TYPES as readonly string[]).includes(normalizedType) && !(acceptsGif && (ANIMATED_IMAGE_MIME_TYPES as readonly string[]).includes(normalizedType))) {
+    throw requestError(415, acceptsGif ? "Use a JPG, PNG, WebP, or GIF image" : "Use a JPG, PNG, or WebP image");
+  }
+  const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
+  return { extension: extensions[normalizedType]!, contentType: normalizedType, maxBytes: IMAGE_MAX_BYTES };
 }
 
 function imageUrl(key: string) {
@@ -122,10 +126,11 @@ export async function completeDirectUpload(category: DirectUploadCategory, userI
   const sample = await s3.send(new GetObjectCommand({ Bucket: env.R2_BUCKET!, Key: token.key, Range: "bytes=0-65535" }));
   if (!sample.Body) { await removeInvalid(); throw requestError(400, "The uploaded file could not be verified"); }
   const detected = await fileTypeFromBuffer(await responseBytes(sample.Body));
-  const valid = category === "music" ? detected?.mime === "audio/mpeg" : !!detected && (IMAGE_MIME_TYPES as readonly string[]).includes(detected.mime);
+  const acceptsGif = category === "profile" || category === "banner" || category === "profile-design";
+  const valid = detected?.mime === token.contentType && (category === "music" ? detected.mime === "audio/mpeg" : (IMAGE_MIME_TYPES as readonly string[]).includes(detected.mime) || (acceptsGif && detected.mime === "image/gif"));
   if (!valid) {
     await removeInvalid();
-    throw requestError(415, category === "music" ? "Only valid MP3 files are accepted" : "Use a JPG, PNG, or WebP image");
+    throw requestError(415, category === "music" ? "Only valid MP3 files are accepted" : acceptsGif ? "Use a JPG, PNG, WebP, or GIF image" : "Use a JPG, PNG, or WebP image");
   }
   if (category === "music") {
     const full = await s3.send(new GetObjectCommand({ Bucket: env.R2_BUCKET!, Key: token.key }));

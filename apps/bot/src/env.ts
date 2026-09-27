@@ -13,6 +13,7 @@ export const env = z.object({
   R2_BUCKET: z.string().min(1).optional(),
   R2_ACCESS_KEY_ID: z.string().min(1).optional(),
   R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  MAX_MP3_MB: z.coerce.number().positive().max(300).default(25),
   YT_DLP_BIN: z.string().default("yt-dlp"),
   FFMPEG_BIN: z.string().default("ffmpeg"),
   YT_DLP_POT_PROVIDER_HOME: z.string().min(1).optional(),

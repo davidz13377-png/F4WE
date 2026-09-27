@@ -4,6 +4,7 @@ import { PrismaClient, Rank } from "@prisma/client";
 import { authorized, env } from "./env.js";
 import { importQueuedRequests } from "./importRequests.js";
 import { downloadLyricsFile, type LyricsType } from "./lyrics.js";
+import { addToStaffPlaylist, downloadDiscordMp3, findDuplicate, removeMusicObject, uploadMusicObject } from "./musicUpload.js";
 
 const prisma = new PrismaClient();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -23,6 +24,14 @@ const commands = [
     )),
   new SlashCommandBuilder().setName("addowner").setDescription("Grant protected Owner alongside the existing app rank")
     .addStringOption(o => o.setName("user_id").setDescription("16-digit app user ID").setRequired(true)),
+  new SlashCommandBuilder().setName("removeowner").setDescription("Remove protected Owner from an app account")
+    .addStringOption(o => o.setName("user_id").setDescription("16-digit app user ID").setRequired(true)),
+  new SlashCommandBuilder().setName("addmusic").setDescription("MP3 feltöltése közvetlenül az F4WE-be")
+    .addStringOption(o => o.setName("zene_neve").setDescription("A zene címe").setMinLength(1).setMaxLength(150).setRequired(true))
+    .addStringOption(o => o.setName("eloado").setDescription("Előadó").setMaxLength(150).setRequired(true))
+    .addStringOption(o => o.setName("kep_link").setDescription("A borítókép HTTPS-linkje").setRequired(true))
+    .addAttachmentOption(o => o.setName("mp3").setDescription("Az MP3-fájl").setRequired(true))
+    .addBooleanOption(o => o.setName("duplikalt_megerositese").setDescription("Igen, ha azonos cím+előadó már létezik")),
   new SlashCommandBuilder().setName("list").setDescription("List registered users")
     .addStringOption(o => o.setName("rank").setDescription("Optional rank filter").addChoices(
       { name: "Access", value: "Access" }, { name: "Moderator", value: "Moderator" }, { name: "Admin", value: "Admin" }, { name: "Developer", value: "Developer" }
@@ -81,6 +90,20 @@ async function onCommand(interaction: ChatInputCommandInteraction) {
       prisma.logEvent.create({ data: { type: "RANK_CHANGE", userId, actionType: "user.owner_granted", details: { grantedByDiscordId: interaction.user.id, rank: current.rank } } })
     ]);
     return interaction.editReply({ content: `${current.username} is now **Owner + ${current.rank}**.` });
+  }
+  if (interaction.commandName === "removeowner") {
+    if (interaction.user.id !== OWNER_DISCORD_ID) return interaction.editReply({ content: "Only the designated Discord owner can run /removeowner." });
+    const userId = interaction.options.getString("user_id", true);
+    if (!/^\d{16}$/.test(userId)) return interaction.editReply({ content: "User ID must contain exactly 16 digits." });
+    const current = await prisma.user.findUnique({ where: { id: userId } });
+    if (!current) return interaction.editReply({ content: "User not found." });
+    if (!current.isOwner) return interaction.editReply({ content: "This account is not an Owner." });
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: userId }, data: { isOwner: false } }),
+      prisma.notification.create({ data: { userId, title: "Owner removed", body: `Your protected Owner status was removed. Your ${current.rank} rank remains.` } }),
+      prisma.logEvent.create({ data: { type: "RANK_CHANGE", userId, actionType: "user.owner_removed", details: { removedByDiscordId: interaction.user.id, rank: current.rank } } })
+    ]);
+    return interaction.editReply({ content: `Owner removed from **${current.username}**. Their **${current.rank}** rank remains.` });
   }
   if (!authorized.has(interaction.user.id)) return interaction.editReply({ content: "Unauthorized" });
 
@@ -191,6 +214,31 @@ async function onCommand(interaction: ChatInputCommandInteraction) {
       })
     ]);
     return interaction.editReply({ content: `Kész: **${song.title}** dalszövege feltöltve (${type === "timed" ? "követős .lrc" : "sima .txt"}). Az app a következő megnyitáskor/frissítéskor már betölti.` });
+  }
+
+  if (interaction.commandName === "addmusic") {
+    if (!requireBotRank(interaction, "Moderator")) return;
+    const title = interaction.options.getString("zene_neve", true).trim();
+    const artist = interaction.options.getString("eloado", true).trim();
+    const artworkUrl = interaction.options.getString("kep_link", true).trim();
+    const attachment = interaction.options.getAttachment("mp3", true);
+    const confirmed = interaction.options.getBoolean("duplikalt_megerositese") === true;
+    try {
+      if (new URL(artworkUrl).protocol !== "https:") throw new Error("HTTPS required");
+    } catch { return interaction.editReply({ content: "A kép linkje csak érvényes HTTPS URL lehet." }); }
+    const duplicate = await findDuplicate(prisma, title, artist);
+    if (duplicate && !confirmed) return interaction.editReply({ content: `Már létezik azonos című és előadójú zene: **${duplicate.title} — ${duplicate.artist}** (\`${duplicate.id}\`). Futtasd újra **duplikalt_megerositese: Igen** beállítással, ha biztosan fel akarod tölteni.` });
+    const buffer = await downloadDiscordMp3(attachment);
+    const stored = await uploadMusicObject(buffer);
+    try {
+      const song = await prisma.$transaction(async tx => {
+        const created = await tx.music.create({ data: { title, artist, artworkUrl, filePath: stored.reference, mimeType: "audio/mpeg" } });
+        await addToStaffPlaylist(tx, created.id);
+        await tx.logEvent.create({ data: { type: "MUSIC_UPLOAD", userId: interaction.user.id, actionType: "music.uploaded_from_discord", details: { musicId: created.id, title, artist, filename: attachment.name, uploadedByDiscordId: interaction.user.id } } });
+        return created;
+      });
+      return interaction.editReply({ content: `Kész: **${song.title} — ${song.artist}** feltöltve az appba és a Staff Playlistbe. ID: \`${song.id}\`` });
+    } catch (error) { await removeMusicObject(stored.key); throw error; }
   }
 
   if (interaction.commandName === "logstart") {

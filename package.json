@@ -19,6 +19,9 @@
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "overrides": {
+    "type-is@1.6.18": {
+      "media-typer": "0.3.0"
+    },
     "@prisma/config": {
       "deepmerge-ts": "8.0.2"
     },

@@ -41,8 +41,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setSocket(nextSocket);
     nextSocket.on("rankChanged", () => void refresh());
     nextSocket.on("profileChanged", () => void refresh());
+    nextSocket.on("coinsChanged", () => void refresh());
     nextSocket.on("accountDeleted", () => void logout());
-    return () => { setSocket(current => current === nextSocket ? null : current); nextSocket.disconnect(); };
+    return () => { nextSocket.off("coinsChanged"); setSocket(current => current === nextSocket ? null : current); nextSocket.disconnect(); };
   }, [token]);
 
   const login = async (username: string, password: string) => saveSession(await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }));

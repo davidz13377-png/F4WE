@@ -65,7 +65,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 
 export type NativeUploadFile = { uri: string; name: string; type: string; size?: number };
 
-export async function uploadFile<T>(path: string, selected: NativeUploadFile, parameters: Record<string, string> = {}) {
+export async function uploadFile<T>(path: string, selected: NativeUploadFile, parameters: Record<string, unknown> = {}) {
   const setup = await api<{ uploadUrl: string; uploadToken: string; contentType: string; expiresIn: number }>(`${path}/upload-url`, {
     method: "POST",
     body: JSON.stringify({ mimeType: selected.type, ...(selected.size !== undefined ? { size: selected.size } : {}) })

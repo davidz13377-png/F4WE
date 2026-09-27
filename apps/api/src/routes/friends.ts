@@ -7,13 +7,17 @@ import { presenceFor, revokeListeningJoin } from "../services/realtime.js";
 
 const router = Router();
 router.use(authenticate);
-const publicUser = { id: true, username: true, rank: true, isOwner: true, profilePicture: true } as const;
+const publicUser = { id: true, username: true, rank: true, isOwner: true, profilePicture: true, activeProfileDesign: { select: { assetUrl: true } } } as const;
+const userView = <T extends { activeProfileDesign: { assetUrl: string } | null }>(user: T) => {
+  const { activeProfileDesign, ...details } = user;
+  return { ...details, profileDesignUrl: activeProfileDesign?.assetUrl ?? null };
+};
 
 router.get("/", asyncRoute(async (req, res) => {
   const rows = await prisma.friendship.findMany({
     where: { userId: req.auth!.userId }, orderBy: { createdAt: "desc" }, include: { friend: { select: publicUser } }
   });
-  res.json(rows.map(row => ({ ...row.friend, friendsSince: row.createdAt, ...presenceFor(row.friendId) })));
+  res.json(rows.map(row => ({ ...userView(row.friend), friendsSince: row.createdAt, ...presenceFor(row.friendId) })));
 }));
 
 router.get("/search", asyncRoute(async (req, res) => {
@@ -29,11 +33,12 @@ router.get("/search", asyncRoute(async (req, res) => {
     prisma.friendRequest.findMany({ where: { receiverId: userId, senderId: { in: ids } }, select: { senderId: true } })
   ]);
   const friendIds = new Set(friends.map(row => row.friendId)), sentIds = new Set(sent.map(row => row.receiverId)), receivedIds = new Set(received.map(row => row.senderId));
-  res.json(users.map(user => ({ ...user, relationship: friendIds.has(user.id) ? "friend" : sentIds.has(user.id) ? "sent" : receivedIds.has(user.id) ? "received" : "none" })));
+  res.json(users.map(user => ({ ...userView(user), relationship: friendIds.has(user.id) ? "friend" : sentIds.has(user.id) ? "sent" : receivedIds.has(user.id) ? "received" : "none" })));
 }));
 
 router.get("/requests", asyncRoute(async (req, res) => {
-  res.json(await prisma.friendRequest.findMany({ where: { receiverId: req.auth!.userId }, orderBy: { createdAt: "desc" }, include: { sender: { select: publicUser } } }));
+  const requests = await prisma.friendRequest.findMany({ where: { receiverId: req.auth!.userId }, orderBy: { createdAt: "desc" }, include: { sender: { select: publicUser } } });
+  res.json(requests.map(({ sender, ...request }) => ({ ...request, sender: userView(sender) })));
 }));
 
 router.post("/requests", asyncRoute(async (req, res) => {

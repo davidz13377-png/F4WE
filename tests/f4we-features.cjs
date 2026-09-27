@@ -33,7 +33,7 @@ const db = {
     findMany: async ({ where, include }) => albums.filter(a => matches(a, where)).map(a => fullAlbum(a, include)),
     findFirst: async ({ where, include }) => fullAlbum(albums.find(a => matches(a, where)), include),
     findUnique: async ({ where }) => albums.find(a => a.id === where.id) || null,
-    create: async ({ data }) => { const a = { id: "p" + ++sequence, creationDate: new Date(), ...data }; albums.push(a); return fullAlbum(a); },
+    create: async ({ data }) => { const a = { id: "p" + ++sequence, creationDate: new Date(), isStaffPlaylist: false, ...data }; albums.push(a); return fullAlbum(a); },
     update: async ({ where, data }) => { const a = albums.find(a => a.id === where.id); Object.assign(a, data); return a; },
     updateMany: async ({ where, data }) => { const match = albums.filter(a => matches(a, where)); match.forEach(a => Object.assign(a, data)); return { count: match.length }; },
     deleteMany: async ({ where }) => { const ids = albums.filter(a => matches(a, where)).map(a => a.id); albums = albums.filter(a => !ids.includes(a.id)); links = links.filter(l => !ids.includes(l.albumId)); saved = saved.filter(s => !ids.includes(s.albumId)); return { count: ids.length }; }
@@ -47,6 +47,8 @@ const db = {
   },
   music: {
     findUnique: async ({ where }) => songs.find(s => s.id === where.id) || null,
+    findFirst: async ({ where }) => songs.find(s => (!where.title || s.title?.toLowerCase() === where.title.equals.toLowerCase()) && (where.artist === null ? !s.artist : !where.artist || s.artist?.toLowerCase() === where.artist.equals.toLowerCase())) || null,
+    count: async () => songs.length,
     findMany: async ({ where }) => songs.filter(s => !where.id || where.id.in.includes(s.id)).map(s => ({ ...s, favorites: favorites.filter(f => f.musicId === s.id && f.userId === actor.id) })),
     create: async ({ data }) => { const song = { id: "s" + ++sequence, uploadDate: new Date(), mimeType: "audio/mpeg", ...data }; songs.push(song); return song; },
     delete: async ({ where }) => { const index = songs.findIndex(s => s.id === where.id); const [s] = songs.splice(index, 1); links = links.filter(l => l.musicId !== where.id); favorites = favorites.filter(f => f.musicId !== where.id); return s; },
@@ -77,7 +79,8 @@ const db = {
     deleteMany: async ({ where }) => { const old = ideas.length; ideas = ideas.filter(i => i.id !== where.id || (where.userId && i.userId !== where.userId)); return { count: old - ideas.length }; }
   },
   accessKey: { findUnique: async ({ where }) => where.key === customKey.key ? customKey : null, update: async ({ data }) => Object.assign(customKey, data) },
-  user: { findUnique: async ({ where }) => registered.find(u => u.id === where.id || u.username === where.username) || null, create: async ({ data }) => { const user = { id: data.id, username: data.username, rank: "Access", isOwner: false, profilePicture: null, registrationDate: new Date(), ...data }; registered.push(user); return user; }, findMany: async ({ where, select }) => { assert.deepEqual(where.OR[1].rank.in.join(","), "Moderator,Admin,Developer"); assert.ok(!select.passwordHash); return [{ ...other, rank: "Admin" }]; }, update: async ({ where, data }) => ({ id: where.id, ...data }), updateMany: async ({ where, data }) => { const matches = registered.filter(u => u.id === where.id && (!where.isOwner || !u.isOwner)); matches.forEach(u => Object.assign(u, data)); return { count: matches.length }; }, deleteMany: async ({ where }) => { const count = registered.filter(u => u.id === where.id && !u.isOwner).length; registered = registered.filter(u => u.id !== where.id || u.isOwner); return { count }; }, findUniqueOrThrow: async ({ where }) => registered.find(u => u.id === where.id) || { id: where.id, profilePicture: null } },
+  rewardInvite: { findUnique: async () => null },
+  user: { findUnique: async ({ where }) => registered.find(u => u.id === where.id || u.username === where.username) || null, findFirst: async ({ where }) => registered.find(u => (!where.NOT?.id || u.id !== where.NOT.id) && (!where.username || u.username.toLowerCase() === where.username.equals.toLowerCase())) || null, create: async ({ data }) => { const user = { id: data.id, username: data.username, rank: "Access", isOwner: false, profilePicture: null, bannerUrl: null, coins: 0, registrationDate: new Date(), ...data }; registered.push(user); return user; }, findMany: async ({ where, select }) => { assert.deepEqual(where.OR[1].rank.in.join(","), "Moderator,Admin,Developer"); assert.ok(!select.passwordHash); return [{ ...other, rank: "Admin" }]; }, update: async ({ where, data }) => ({ id: where.id, ...data }), updateMany: async ({ where, data }) => { const matches = registered.filter(u => u.id === where.id && (!where.isOwner || !u.isOwner)); matches.forEach(u => Object.assign(u, data)); return { count: matches.length }; }, deleteMany: async ({ where }) => { const count = registered.filter(u => u.id === where.id && !u.isOwner).length; registered = registered.filter(u => u.id !== where.id || u.isOwner); return { count }; }, findUniqueOrThrow: async ({ where }) => registered.find(u => u.id === where.id) || { id: where.id, profilePicture: null, animatedProfileUnlocked: false } },
   $queryRaw: async () => [], $transaction: async cb => cb(db)
 };
 const env = { PUBLIC_API_URL: "http://127.0.0.1:4000", MAX_MP3_MB: 25, UPLOAD_DIR: "uploads", JWT_SECRET: "test-secret-that-is-more-than-32-characters" };
@@ -111,10 +114,10 @@ const storageMock = {
   },
   saveMusic: async buffer => { const value = path.resolve(env.UPLOAD_DIR, `test-${Date.now()}.mp3`); fs.writeFileSync(value, buffer); return value; },
   deleteMusic: async value => { try { fs.unlinkSync(value); } catch {} },
-  openMusic: async () => null,
+  openMusic: async () => null, mp3DurationSeconds: () => null,
   storedMusicName: value => path.basename(value)
 };
-const mocks = { "../db.js": { prisma: db }, "../middleware/auth.js": auth, "../middleware/errors.js": errors, "../env.js": { env }, "../services/catalog.js": catalog, "../services/logging.js": { audit: async () => {} }, "../services/realtime.js": { notifyUser: () => {} }, "../services/storage.js": storageMock, "../services/spotify.js": {
+const mocks = { "../db.js": { prisma: db }, "../middleware/auth.js": auth, "../middleware/errors.js": errors, "../env.js": { env }, "../services/catalog.js": catalog, "../services/logging.js": { audit: async () => {} }, "../services/realtime.js": { notifyUser: () => {}, publishListening: () => {} }, "../services/staffPlaylist.js": { isStaff: (rank, isOwner) => isOwner || ["Moderator", "Admin", "Developer"].includes(rank), addSongToStaffPlaylist: async () => {} }, "../services/storage.js": storageMock, "../services/spotify.js": {
   canonicalSpotifyTrackUrl: url => url.protocol === "https:" && url.hostname === "open.spotify.com" && /^\/track\/[A-Za-z0-9]{22}$/.test(url.pathname) ? `https://open.spotify.com${url.pathname}` : null,
   spotifyTrackMetadata: async () => ({ title: "Spotify test track", artworkUrl: "https://i.scdn.co/image/test" })
 }, "file-type": { fileTypeFromBuffer: buffer => detector(buffer) } };
@@ -129,6 +132,12 @@ let base;
 async function request(method, route, body, authorized = true) {
   const response = await fetch(base + route, { method, headers: { "Content-Type": "application/json", ...(authorized ? { Authorization: "Bearer mock" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   return { status: response.status, body: await response.json().catch(() => null) };
+}
+function multipartFile(filename, mimeType, bytes) {
+  const boundary = `----f4we-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const opening = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`);
+  const closing = Buffer.from(`\r\n--${boundary}--\r\n`);
+  return { body: Buffer.concat([opening, Buffer.from(bytes), closing]), contentType: `multipart/form-data; boundary=${boundary}` };
 }
 async function main() {
   detector = (await import("file-type")).fileTypeFromBuffer;
@@ -185,11 +194,11 @@ async function main() {
     assert.equal(directSong.status, 201); assert.equal(directSong.body.filePath, "r2://music/direct.mp3");
     assert.equal((await request("POST", "/api/music/upload/upload-url", { mimeType: "image/png", size: 123 })).status, 415);
     const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64");
-    const artworkForm = new FormData(); artworkForm.append("file", new Blob([png], { type: "image/png" }), "song.png");
-    const artworkResponse = await fetch(base + "/api/music/s1/picture", { method: "POST", headers: { Authorization: "Bearer mock" }, body: artworkForm });
-    assert.equal(artworkResponse.status, 200); assert.ok((await artworkResponse.json()).artworkUrl.includes("/media/music-artwork/"));
-    const badArtworkForm = new FormData(); badArtworkForm.append("file", new Blob(["not a picture"], { type: "image/png" }), "fake.png");
-    assert.equal((await fetch(base + "/api/music/s1/picture", { method: "POST", headers: { Authorization: "Bearer mock" }, body: badArtworkForm })).status, 415);
+    const artworkForm = multipartFile("song.png", "image/png", png);
+    const artworkResponse = await fetch(base + "/api/music/s1/picture", { method: "POST", headers: { Authorization: "Bearer mock", "Content-Type": artworkForm.contentType }, body: artworkForm.body });
+    const artworkBody = await artworkResponse.json(); assert.equal(artworkResponse.status, 200, JSON.stringify(artworkBody)); assert.ok(artworkBody.artworkUrl.includes("/media/music-artwork/"));
+    const badArtworkForm = multipartFile("fake.png", "image/png", Buffer.from("not a picture"));
+    assert.equal((await fetch(base + "/api/music/s1/picture", { method: "POST", headers: { Authorization: "Bearer mock", "Content-Type": badArtworkForm.contentType }, body: badArtworkForm.body })).status, 415);
     assert.equal((await request("DELETE", "/api/music/s1/picture")).status, 204);
     assert.equal((await request("DELETE", "/api/music/s1")).status, 403);
     actor = owner;
@@ -197,19 +206,19 @@ async function main() {
     assert.equal(directPhotoSetup.status, 200);
     const directPhoto = await request("POST", "/api/profile/me/picture/complete", { uploadToken: directPhotoSetup.body.uploadToken });
     assert.equal(directPhoto.status, 200); assert.ok(directPhoto.body.profilePicture.includes("/media/profile/"));
-    const photoForm = new FormData(); photoForm.append("file", new Blob([png], { type: "image/png" }), "avatar.png");
-    const photoResponse = await fetch(base + "/api/profile/me/picture", { method: "POST", headers: { Authorization: "Bearer mock" }, body: photoForm });
+    const photoForm = multipartFile("avatar.png", "image/png", png);
+    const photoResponse = await fetch(base + "/api/profile/me/picture", { method: "POST", headers: { Authorization: "Bearer mock", "Content-Type": photoForm.contentType }, body: photoForm.body });
     assert.equal(photoResponse.status, 200); const photo = await photoResponse.json(); assert.ok(photo.profilePicture.includes("/media/profile/"));
     assert.deepEqual(fs.readFileSync(path.join(tempDirectory, "profile", path.basename(photo.profilePicture))), png);
-    const badForm = new FormData(); badForm.append("file", new Blob(["Not a picture"], { type: "image/png" }), "fake.png");
-    assert.equal((await fetch(base + "/api/profile/me/picture", { method: "POST", headers: { Authorization: "Bearer mock" }, body: badForm })).status, 415);
+    const badForm = multipartFile("fake.png", "image/png", Buffer.from("Not a picture"));
+    assert.equal((await fetch(base + "/api/profile/me/picture", { method: "POST", headers: { Authorization: "Bearer mock", "Content-Type": badForm.contentType }, body: badForm.body })).status, 415);
     assert.equal((await request("POST", "/api/playlists", { name: " " })).status, 400);
     const created = await request("POST", "/api/playlists", { name: "Evening mix", isPublic: true }); assert.equal(created.status, 201); const id = created.body.id;
     const directPlaylistSetup = await request("POST", `/api/playlists/${id}/picture/upload-url`, { mimeType: "image/webp", size: 68 });
     assert.equal(directPlaylistSetup.status, 200);
     assert.equal((await request("POST", `/api/playlists/${id}/picture/complete`, { uploadToken: directPlaylistSetup.body.uploadToken })).status, 200);
-    const playlistPhoto = new FormData(); playlistPhoto.append("file", new Blob([png], { type: "image/png" }), "cover.png");
-    const playlistPhotoResponse = await fetch(base + `/api/playlists/${id}/picture`, { method: "POST", headers: { Authorization: "Bearer mock" }, body: playlistPhoto });
+    const playlistPhoto = multipartFile("cover.png", "image/png", png);
+    const playlistPhotoResponse = await fetch(base + `/api/playlists/${id}/picture`, { method: "POST", headers: { Authorization: "Bearer mock", "Content-Type": playlistPhoto.contentType }, body: playlistPhoto.body });
     assert.equal(playlistPhotoResponse.status, 200); assert.ok((await playlistPhotoResponse.json()).artworkUrl.includes("/media/playlist/"));
     assert.equal((await request("POST", "/api/playlists/" + id + "/songs", { musicId: "s2" })).status, 204);
     assert.equal((await request("POST", "/api/playlists/" + id + "/songs", { musicId: "s1" })).status, 204);
@@ -321,9 +330,9 @@ async function main() {
     react: { useState: value => [value, () => {}], useRef: value => ({ current: value }), useEffect: () => {} }, "react/jsx-runtime": { jsx, jsxs: jsx },
     "@expo/vector-icons": { Ionicons: "Icon" }, "expo-clipboard": { setStringAsync: async () => {} }, "expo-router": { router: {} },
     "expo-image-picker": { requestMediaLibraryPermissionsAsync: async () => { permissionCalls++; return { granted: permission }; }, launchImageLibraryAsync: async () => ({ canceled: false, assets: [{ uri: "file:///cache/avatar.png", fileName: "avatar.png", mimeType: "image/png", fileSize: oversized ? 6 * 1024 * 1024 : 3 }] }) },
-    "react-native": { Platform: platform, ActivityIndicator: "Spinner", Alert: { alert: (...args) => alerts.push(args) }, Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { create: s => s } },
+    "react-native": { Platform: platform, ActivityIndicator: "Spinner", Alert: { alert: (...args) => alerts.push(args) }, Modal: "Modal", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { create: s => s, absoluteFill: {} } }, "expo-image": { Image: "Image" },
     "../../src/components/F4WEAlert": { F4WEAlert: { alert: (...args) => alerts.push(args) } },
-    "../../src/components/UI": { Button: "Button", Card: "Card", RankBadge: "Badge", OwnerBadge: "OwnerBadge", Screen: "Screen", Title: "Title", ui: {} },
+    "../../src/components/UI": { Button: "Button", Card: "Card", Input: "Input", RankBadge: "Badge", OwnerBadge: "OwnerBadge", Screen: "Screen", Title: "Title", ui: {} },
     "../../src/context/AuthContext": { useAuth: () => ({ user: owner, refresh: async () => refreshed++, logout: async () => {} }) },
     "../../src/lib/theme": { colors: {} }, "../../src/lib/media": media, "../../src/lib/time": { fullDuration: value => String(value) },
     "../../src/lib/api": { api: async () => ({}), uploadFile: async (route, file) => { assert.equal(route, "/api/profile/me/picture"); assert.equal(file.uri, "file:///cache/avatar.png"); assert.equal(file.name, "avatar.png"); assert.equal(file.type, "image/png"); assert.equal(file.size, 3); uploads++; } }

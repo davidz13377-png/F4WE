@@ -5,8 +5,9 @@ import type { Rank } from "@prisma/client";
 import { app } from "./app.js";
 import { env } from "./env.js";
 import { prisma } from "./db.js";
-import { notifyUser, presenceFor, publishListening, setSocketServer, userConnected, userDisconnected } from "./services/realtime.js";
+import { addListeningFollower, notifyUser, presenceFor, publishListening, removeListeningFollower, setSocketServer, userConnected, userDisconnected } from "./services/realtime.js";
 import { audit } from "./services/logging.js";
+import { backfillStaffPlaylist } from "./services/staffPlaylist.js";
 
 const server = createServer(app);
 const io = new Server(server, { cors: { origin: env.CORS_ORIGINS.split(",").map(v => v.trim()) } });
@@ -61,19 +62,29 @@ io.on("connection", socket => {
       if (!friendship || !target?.shareListening) throw new Error("This friend is not sharing listening activity");
       const current = presenceFor(targetId).listening;
       if (!current) throw new Error("This friend is not currently listening");
-      for (const room of socket.rooms) if (room.startsWith("listen:")) socket.leave(room);
+      const previous = socket.data.listeningTargetId as string | undefined;
+      if (previous) { socket.leave(`listen:${previous}`); removeListeningFollower(userId, previous); }
+      const listener = await prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { username: true } });
       socket.join(`listen:${targetId}`);
+      socket.data.listeningTargetId = targetId;
+      addListeningFollower(userId, listener.username, targetId);
       socket.emit("listening:state", { userId: targetId, ...current });
       reply?.({ ok: true });
     } catch (error) { reply?.({ ok: false, error: error instanceof Error ? error.message : "Could not join" }); }
   });
 
   socket.on("listening:leave", () => {
-    for (const room of socket.rooms) if (room.startsWith("listen:")) socket.leave(room);
+    const targetId = socket.data.listeningTargetId as string | undefined;
+    if (targetId) { socket.leave(`listen:${targetId}`); removeListeningFollower(userId, targetId); delete socket.data.listeningTargetId; }
   });
-  socket.on("disconnect", () => userDisconnected(userId));
+  socket.on("disconnect", () => {
+    const targetId = socket.data.listeningTargetId as string | undefined;
+    if (targetId) removeListeningFollower(userId, targetId);
+    userDisconnected(userId);
+  });
 });
 setSocketServer(io);
+void backfillStaffPlaylist().catch(error => console.error("Staff Playlist sync failed", error));
 
 let lastRankCheck = new Date();
 setInterval(async () => {

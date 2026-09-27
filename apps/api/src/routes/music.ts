@@ -8,8 +8,10 @@ import { env } from "../env.js";
 import { authenticate, requireRank } from "../middleware/auth.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { audit } from "../services/logging.js";
+import { notifyUser } from "../services/realtime.js";
 import { songView } from "../services/catalog.js";
 import { beginDirectUpload, completeDirectUpload, deleteImage, deleteMusic, mp3DurationSeconds, openMusic, saveImage, saveMusic, storedMusicName } from "../services/storage.js";
+import { addSongToStaffPlaylist } from "../services/staffPlaylist.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_MP3_MB * 1024 * 1024, files: 1 } });
@@ -18,6 +20,20 @@ const directUploadRequest = z.object({ mimeType: z.string().min(1).max(100), siz
 const directUploadCompletion = z.object({ uploadToken: z.string().min(1).max(5000) }).strict();
 
 router.use(authenticate);
+
+const normalizedDuplicate = async (title: string, artist?: string | null) => prisma.music.findFirst({
+  where: { title: { equals: title.trim(), mode: "insensitive" }, artist: artist?.trim() ? { equals: artist.trim(), mode: "insensitive" } : null },
+  select: { id: true, title: true, artist: true, artworkUrl: true }
+});
+
+router.get("/count", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (_req, res) => {
+  res.json({ count: await prisma.music.count() });
+}));
+
+router.get("/duplicate", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
+  const query = z.object({ title: z.string().trim().min(1).max(150), artist: z.string().trim().max(150).optional() }).parse(req.query);
+  res.json({ duplicate: await normalizedDuplicate(query.title, query.artist) });
+}));
 
 router.get("/", asyncRoute(async (req, res) => {
   const q = z.string().max(100).catch("").parse(req.query.q ?? "");
@@ -166,12 +182,22 @@ router.post("/upload/complete", requireRank(Rank.Moderator, Rank.Admin, Rank.Dev
     uploadToken: z.string().min(1).max(5000),
     title: z.string().trim().min(1).max(150),
     artist: z.string().trim().max(150).optional(),
-    artworkUrl: z.string().url().optional()
+    artworkUrl: z.string().url().optional(),
+    confirmDuplicate: z.boolean().default(false)
   }).strict().parse(req.body ?? {});
   const uploaded = await completeDirectUpload("music", req.auth!.userId, input.uploadToken);
+  const duplicate = await normalizedDuplicate(input.title, input.artist);
+  if (duplicate && !input.confirmDuplicate) {
+    await deleteMusic(uploaded.reference).catch(() => undefined);
+    return res.status(409).json({ error: "A song with this title and artist already exists", duplicate, confirmationRequired: true });
+  }
   let song;
   try {
-    song = await prisma.music.create({ data: { title: input.title, artist: input.artist, artworkUrl: input.artworkUrl, filePath: uploaded.reference, mimeType: uploaded.mimeType, duration: uploaded.duration, uploaderId: req.auth!.userId } });
+    song = await prisma.$transaction(async tx => {
+      const created = await tx.music.create({ data: { title: input.title, artist: input.artist, artworkUrl: input.artworkUrl, filePath: uploaded.reference, mimeType: uploaded.mimeType, duration: uploaded.duration, uploaderId: req.auth!.userId } });
+      await addSongToStaffPlaylist(created.id, tx);
+      return created;
+    });
   } catch (error) {
     await deleteMusic(uploaded.reference).catch(() => undefined);
     throw error;
@@ -181,14 +207,20 @@ router.post("/upload/complete", requireRank(Rank.Moderator, Rank.Admin, Rank.Dev
 }));
 
 router.post("/upload", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), upload.single("file"), asyncRoute(async (req, res) => {
-  const meta = z.object({ title: z.string().trim().min(1).max(150), artist: z.string().trim().max(150).optional(), artworkUrl: z.string().url().optional() }).parse(req.body ?? {});
+  const meta = z.object({ title: z.string().trim().min(1).max(150), artist: z.string().trim().max(150).optional(), artworkUrl: z.string().url().optional(), confirmDuplicate: z.enum(["true", "false"]).optional().transform(value => value === "true") }).parse(req.body ?? {});
+  const duplicate = await normalizedDuplicate(meta.title, meta.artist);
+  if (duplicate && !meta.confirmDuplicate) return res.status(409).json({ error: "A song with this title and artist already exists", duplicate, confirmationRequired: true });
   if (!req.file) return res.status(400).json({ error: "MP3 file is required" });
   const detected = await fileTypeFromBuffer(req.file.buffer);
   if (detected?.mime !== "audio/mpeg") return res.status(415).json({ error: "Only valid MP3 files are accepted" });
   const filePath = await saveMusic(req.file.buffer);
   let song;
   try {
-    song = await prisma.music.create({ data: { ...meta, filePath, duration: mp3DurationSeconds(req.file.buffer), uploaderId: req.auth!.userId } });
+    song = await prisma.$transaction(async tx => {
+      const created = await tx.music.create({ data: { title: meta.title, artist: meta.artist, artworkUrl: meta.artworkUrl, filePath, duration: mp3DurationSeconds(req.file!.buffer), uploaderId: req.auth!.userId } });
+      await addSongToStaffPlaylist(created.id, tx);
+      return created;
+    });
   } catch (error) {
     await deleteMusic(filePath).catch(() => undefined);
     throw error;
@@ -225,17 +257,39 @@ router.post("/:id/like", asyncRoute(async (req, res) => {
 router.post("/:id/play", asyncRoute(async (req, res) => {
   const musicId = req.params.id as string;
   if (!await prisma.music.findUnique({ where: { id: musicId }, select: { id: true } })) return res.status(404).json({ error: "Song not found" });
-  const play = await prisma.musicPlay.create({ data: { userId: req.auth!.userId, musicId }, select: { id: true } });
+  const play = await prisma.musicPlay.create({ data: { userId: req.auth!.userId, musicId, lastHeartbeatAt: new Date() }, select: { id: true } });
   res.status(201).json(play);
 }));
 
 router.patch("/:id/play/:playId", asyncRoute(async (req, res) => {
-  const seconds = z.object({ seconds: z.number().int().min(1).max(30) }).strict().parse(req.body).seconds;
-  const result = await prisma.musicPlay.updateMany({
-    where: { id: req.params.playId as string, musicId: req.params.id as string, userId: req.auth!.userId },
-    data: { listenedSeconds: { increment: seconds } }
+  const seconds = z.object({ seconds: z.number().int().min(1).max(600) }).strict().parse(req.body).seconds;
+  const userId = req.auth!.userId, playId = req.params.playId as string, musicId = req.params.id as string;
+  const settings = await prisma.systemSetting.findMany({ where: { key: { in: ["reward.interval_seconds", "reward.coin_amount"] } } });
+  const setting = new Map(settings.map(item => [item.key, Number(item.value)]));
+  const interval = Math.max(60, Math.min(86_400, setting.get("reward.interval_seconds") || 180));
+  const coinAmount = Math.max(1, Math.min(10_000, setting.get("reward.coin_amount") || 1));
+  const reward = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "MusicPlay" WHERE id = ${playId} FOR UPDATE`;
+    const play = await tx.musicPlay.findFirst({ where: { id: playId, musicId, userId } });
+    if (!play) return null;
+    const latest = await tx.musicPlay.findFirst({ where: { userId }, orderBy: [{ playedAt: "desc" }, { id: "desc" }], select: { id: true } });
+    if (latest?.id !== play.id) return null;
+    const now = new Date();
+    const elapsed = Math.max(0, Math.floor((now.getTime() - (play.lastHeartbeatAt ?? play.playedAt).getTime()) / 1000));
+    const credited = Math.min(seconds, Math.max(0, elapsed + 2), 600);
+    await tx.musicPlay.update({ where: { id: play.id }, data: { listenedSeconds: { increment: credited }, lastHeartbeatAt: now } });
+    if (!credited) return { granted: 0, coins: null };
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { rewardSeconds: true, coins: true } });
+    const accumulated = user.rewardSeconds + credited;
+    const grants = Math.floor(accumulated / interval);
+    const granted = grants * coinAmount;
+    const updated = await tx.user.update({ where: { id: userId }, data: { rewardSeconds: accumulated % interval, ...(granted ? { coins: { increment: granted } } : {}) }, select: { coins: true } });
+    if (granted) await tx.coinTransaction.create({ data: { userId, amount: granted, reason: "listening.reward" } });
+    return { granted, coins: updated.coins };
   });
-  if (!result.count) return res.status(404).json({ error: "Listening session not found" });
+  if (!reward) return res.status(404).json({ error: "Listening session not found" });
+  if (reward.granted && reward.coins !== null) notifyUser(userId, "coinsChanged", { coins: reward.coins, granted: reward.granted });
   res.status(204).end();
 }));
 

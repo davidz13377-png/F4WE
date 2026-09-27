@@ -23,71 +23,85 @@ enum ReviewStatus {
 }
 
 model User {
-  id                String             @id @db.Char(16)
-  username          String             @unique @db.VarChar(32)
-  passwordHash      String
-  rank              Rank               @default(Access)
-  isOwner           Boolean            @default(false)
-  profilePicture    String?
-  shareListening    Boolean            @default(false)
-  registrationDate DateTime            @default(now())
-  accessKeyUsed     String             @db.VarChar(64)
-  accessKey         AccessKey           @relation(fields: [accessKeyUsed], references: [key])
-  uploadedMusic     Music[]             @relation("Uploader")
-  albums            Album[]
-  favorites         Favorite[]
-  musicPlays        MusicPlay[]
-  savedAlbums       SavedAlbum[]
-  musicRequests     MusicRequest[]
-  bugReports        BugReport[]
-  updateIdeas       UpdateIdea[]
-  updatePosts       UpdatePost[]
-  notifications     Notification[]
-  rankChanges       UserRanksHistory[]  @relation("ChangedUser")
-  rankChangesMade   UserRanksHistory[]  @relation("ChangedBy")
-  sentFriendRequests     FriendRequest[] @relation("SentFriendRequests")
-  receivedFriendRequests FriendRequest[] @relation("ReceivedFriendRequests")
-  friendships            Friendship[]   @relation("FriendshipOwner")
-  friendedBy             Friendship[]   @relation("FriendshipTarget")
+  id                      String               @id @db.Char(16)
+  username                String               @unique @db.VarChar(32)
+  passwordHash            String
+  rank                    Rank                 @default(Access)
+  isOwner                 Boolean              @default(false)
+  profilePicture          String?
+  bannerUrl               String?
+  shareListening          Boolean              @default(false)
+  coins                   Int                  @default(0)
+  rewardSeconds           Int                  @default(0)
+  animatedProfileUnlocked Boolean              @default(false)
+  animatedBannerUnlocked  Boolean              @default(false)
+  activeProfileDesignId   String?
+  registrationDate        DateTime             @default(now())
+  accessKeyUsed           String               @db.VarChar(64)
+  accessKey               AccessKey            @relation(fields: [accessKeyUsed], references: [key])
+  uploadedMusic           Music[]              @relation("Uploader")
+  albums                  Album[]
+  favorites               Favorite[]
+  musicPlays              MusicPlay[]
+  savedAlbums             SavedAlbum[]
+  musicRequests           MusicRequest[]
+  bugReports              BugReport[]
+  updateIdeas             UpdateIdea[]
+  updatePosts             UpdatePost[]
+  notifications           Notification[]
+  rankChanges             UserRanksHistory[]   @relation("ChangedUser")
+  rankChangesMade         UserRanksHistory[]   @relation("ChangedBy")
+  sentFriendRequests      FriendRequest[]      @relation("SentFriendRequests")
+  receivedFriendRequests  FriendRequest[]      @relation("ReceivedFriendRequests")
+  friendships             Friendship[]         @relation("FriendshipOwner")
+  friendedBy              Friendship[]         @relation("FriendshipTarget")
+  activeProfileDesign     ProfileDesign?       @relation("ActiveProfileDesign", fields: [activeProfileDesignId], references: [id], onDelete: SetNull)
+  ownedProfileDesigns     OwnedProfileDesign[]
+  createdProfileDesigns   ProfileDesign[]      @relation("ProfileDesignCreator")
+  coinTransactions        CoinTransaction[]    @relation("CoinOwner")
+  coinTransactionsMade    CoinTransaction[]    @relation("CoinActor")
+  rewardInvites           RewardInvite[]
 }
 
 model AccessKey {
-  key                String   @id @db.VarChar(64)
-  used               Boolean  @default(false)
-  usageLimit         Int      @default(1)
-  usedCount          Int      @default(0)
+  key                String        @id @db.VarChar(64)
+  used               Boolean       @default(false)
+  usageLimit         Int           @default(1)
+  usedCount          Int           @default(0)
   createdByDiscordId String
-  createdDate        DateTime @default(now())
+  createdDate        DateTime      @default(now())
   usedDate           DateTime?
   users              User[]
+  rewardInvite       RewardInvite?
 }
 
 model Music {
-  id          String      @id @default(cuid())
-  title       String
-  artist      String?
-  filePath    String
-  mimeType    String      @default("audio/mpeg")
-  duration    Int?
-  artworkUrl  String?
-  lyrics      String?
-  lyricsSynced Boolean   @default(false)
-  uploaderId  String?     @db.Char(16)
-  uploadDate  DateTime    @default(now())
-  uploader    User?       @relation("Uploader", fields: [uploaderId], references: [id], onDelete: SetNull)
-  albums      AlbumSong[]
-  favorites   Favorite[]
-  plays       MusicPlay[]
+  id           String      @id @default(cuid())
+  title        String
+  artist       String?
+  filePath     String
+  mimeType     String      @default("audio/mpeg")
+  duration     Int?
+  artworkUrl   String?
+  lyrics       String?
+  lyricsSynced Boolean     @default(false)
+  uploaderId   String?     @db.Char(16)
+  uploadDate   DateTime    @default(now())
+  uploader     User?       @relation("Uploader", fields: [uploaderId], references: [id], onDelete: SetNull)
+  albums       AlbumSong[]
+  favorites    Favorite[]
+  plays        MusicPlay[]
 }
 
 model MusicPlay {
-  id       String   @id @default(cuid())
-  userId   String   @db.Char(16)
-  musicId  String
-  playedAt DateTime @default(now())
-  listenedSeconds Int @default(0)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  music    Music    @relation(fields: [musicId], references: [id], onDelete: Cascade)
+  id              String    @id @default(cuid())
+  userId          String    @db.Char(16)
+  musicId         String
+  playedAt        DateTime  @default(now())
+  listenedSeconds Int       @default(0)
+  lastHeartbeatAt DateTime?
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  music           Music     @relation(fields: [musicId], references: [id], onDelete: Cascade)
 
   @@index([userId, playedAt])
   @@index([musicId, playedAt])
@@ -117,24 +131,26 @@ model Friendship {
 }
 
 model Album {
-  id           String       @id @default(cuid())
-  name         String
-  description  String?
-  artworkUrl   String?
-  creatorId    String       @db.Char(16)
-  creationDate DateTime     @default(now())
-  isPublic     Boolean      @default(false)
-  creator      User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  songs        AlbumSong[]
-  savedBy      SavedAlbum[]
+  id              String       @id @default(cuid())
+  name            String
+  description     String?
+  artworkUrl      String?
+  creatorId       String       @db.Char(16)
+  creationDate    DateTime     @default(now())
+  isPublic        Boolean      @default(false)
+  isStaffPlaylist Boolean      @default(false)
+  creator         User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  songs           AlbumSong[]
+  savedBy         SavedAlbum[]
 }
 
 model AlbumSong {
   albumId String
   musicId String
-  order   Int      @default(0)
-  album   Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  music   Music    @relation(fields: [musicId], references: [id], onDelete: Cascade)
+  order   Int    @default(0)
+  album   Album  @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  music   Music  @relation(fields: [musicId], references: [id], onDelete: Cascade)
+
   @@id([albumId, musicId])
 }
 
@@ -144,6 +160,7 @@ model Favorite {
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   music     Music    @relation(fields: [musicId], references: [id], onDelete: Cascade)
+
   @@id([userId, musicId])
 }
 
@@ -153,6 +170,7 @@ model SavedAlbum {
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   album     Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
   @@id([userId, albumId])
 }
 
@@ -184,12 +202,12 @@ model BugReport {
 }
 
 model UpdatePost {
-  id          String   @id @default(cuid())
-  developerId String   @db.Char(16)
+  id          String    @id @default(cuid())
+  developerId String    @db.Char(16)
   content     String
-  postedDate  DateTime @default(now())
+  postedDate  DateTime  @default(now())
   editedDate  DateTime?
-  developer   User     @relation(fields: [developerId], references: [id], onDelete: Cascade)
+  developer   User      @relation(fields: [developerId], references: [id], onDelete: Cascade)
 }
 
 model UpdateIdea {
@@ -223,18 +241,76 @@ model UserRanksHistory {
 }
 
 model LogEvent {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   type        String
   userId      String?
   actionType  String
   details     Json
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   deliveredAt DateTime?
-  attempts    Int      @default(0)
+  attempts    Int       @default(0)
 }
 
 model SystemSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+model ShopProduct {
+  key         String   @id
+  name        String
+  description String
+  price       Int
+  active      Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+}
+
+model ProfileDesign {
+  id          String               @id @default(cuid())
+  name        String
+  assetUrl    String
+  price       Int
+  isLimited   Boolean              @default(false)
+  active      Boolean              @default(true)
+  createdAt   DateTime             @default(now())
+  createdById String               @db.Char(16)
+  createdBy   User                 @relation("ProfileDesignCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  owners      OwnedProfileDesign[]
+  activeUsers User[]               @relation("ActiveProfileDesign")
+}
+
+model OwnedProfileDesign {
+  userId      String        @db.Char(16)
+  designId    String
+  purchasedAt DateTime      @default(now())
+  pricePaid   Int
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  design      ProfileDesign @relation(fields: [designId], references: [id], onDelete: Cascade)
+
+  @@id([userId, designId])
+}
+
+model CoinTransaction {
+  id        String   @id @default(cuid())
+  userId    String   @db.Char(16)
+  amount    Int
+  reason    String
+  actorId   String?  @db.Char(16)
+  createdAt DateTime @default(now())
+  user      User     @relation("CoinOwner", fields: [userId], references: [id], onDelete: Cascade)
+  actor     User?    @relation("CoinActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
+
+model RewardInvite {
+  id        String    @id @default(cuid())
+  buyerId   String    @db.Char(16)
+  accessKey String    @unique @db.VarChar(64)
+  createdAt DateTime  @default(now())
+  buyer     User      @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  access    AccessKey @relation(fields: [accessKey], references: [key], onDelete: Cascade)
+
+  @@index([buyerId, createdAt])
 }

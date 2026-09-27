@@ -33,7 +33,8 @@
       "expo-router",
       "expo-secure-store",
       "expo-document-picker",
-      "./plugins/withF4WEAndroid"
+      "./plugins/withF4WEAndroid",
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true

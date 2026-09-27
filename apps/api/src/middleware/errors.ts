@@ -14,6 +14,9 @@ export function errorHandler(error: unknown, req: Request, res: Response, _next:
   if (typeof error === "object" && error && "status" in error && typeof error.status === "number") {
     return res.status(error.status).json({ error: error instanceof Error ? error.message : "Request failed" });
   }
+  if (typeof error === "object" && error && "code" in error && error.code === "P2002") {
+    return res.status(409).json({ error: "That value is already in use" });
+  }
   console.error(error);
   void audit("DEBUG", req.auth?.userId ?? null, "api.unexpected_error", {
     method: req.method, path: req.originalUrl,

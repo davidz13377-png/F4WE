@@ -19,14 +19,27 @@ const directUploadCompletion = z.object({ uploadToken: z.string().min(1).max(500
 router.use(authenticate);
 
 router.get("/staff-team", asyncRoute(async (_req, res) => {
-  res.json(await prisma.user.findMany({ where: { OR: [{ isOwner: true }, { rank: { in: [Rank.Moderator, Rank.Admin, Rank.Developer] } }] },
-    select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true }, orderBy: [{ isOwner: "desc" }, { rank: "desc" }, { username: "asc" }] }));
+  const users = await prisma.user.findMany({ where: { OR: [{ isOwner: true }, { rank: { in: [Rank.Moderator, Rank.Admin, Rank.Developer] } }] },
+    select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, activeProfileDesign: { select: { assetUrl: true } } }, orderBy: [{ isOwner: "desc" }, { rank: "desc" }, { username: "asc" }] });
+  res.json(users.map(({ activeProfileDesign, ...user }) => ({ ...user, profileDesignUrl: activeProfileDesign?.assetUrl ?? null })));
 }));
 
 router.get("/me", asyncRoute(async (req, res) => {
-  const user = await prisma.user.findUnique({ where: { id: req.auth!.userId }, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, registrationDate: true, shareListening: true } });
+  const user = await prisma.user.findUnique({ where: { id: req.auth!.userId }, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, bannerUrl: true, coins: true, animatedProfileUnlocked: true, animatedBannerUnlocked: true, activeProfileDesign: { select: { assetUrl: true } }, registrationDate: true, shareListening: true } });
   if (!user) return res.status(404).json({ error: "User not found" });
-  res.json({ user, refreshedToken: signToken(user.id, user.rank) });
+  const { activeProfileDesign, ...details } = user;
+  res.json({ user: { ...details, profileDesignUrl: activeProfileDesign?.assetUrl ?? null }, refreshedToken: signToken(user.id, user.rank) });
+}));
+
+router.get("/users/:id", asyncRoute(async (req, res) => {
+  const user = await prisma.user.findUnique({ where: { id: req.params.id as string }, select: {
+    id: true, username: true, rank: true, isOwner: true, profilePicture: true, bannerUrl: true, registrationDate: true,
+    activeProfileDesign: { select: { assetUrl: true } },
+    albums: { where: { isPublic: true, isStaffPlaylist: false }, orderBy: { creationDate: "desc" }, include: { _count: { select: { songs: true } }, songs: { select: { music: { select: { duration: true } } } } } }
+  } });
+  if (!user) return res.status(404).json({ error: "User not found" });
+  const { activeProfileDesign, albums, ...details } = user;
+  res.json({ ...details, profileDesignUrl: activeProfileDesign?.assetUrl ?? null, playlists: albums.map(({ _count, songs, ...playlist }) => ({ ...playlist, trackCount: _count.songs, totalDuration: songs.reduce((sum, item) => sum + (item.music.duration ?? 0), 0) })) });
 }));
 
 router.patch("/me/listening-privacy", asyncRoute(async (req, res) => {
@@ -65,13 +78,21 @@ router.get("/me/recap", asyncRoute(async (req, res) => {
 }));
 
 router.patch("/me", asyncRoute(async (req, res) => {
-  const input = z.object({ profilePicture: z.string().url().nullable() }).parse(req.body);
-  const user = await prisma.user.update({ where: { id: req.auth!.userId }, data: input, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true } });
+  const input = z.object({ username: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9_.-]+$/, "Use letters, numbers, _, . or -") }).strict().parse(req.body);
+  if (input.username && await prisma.user.findFirst({ where: { username: { equals: input.username, mode: "insensitive" }, NOT: { id: req.auth!.userId } }, select: { id: true } })) {
+    return res.status(409).json({ error: "That username is already taken" });
+  }
+  const user = await prisma.user.update({ where: { id: req.auth!.userId }, data: input, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, bannerUrl: true, coins: true } });
+  notifyUser(user.id, "profileChanged", user);
   res.json(user);
 }));
 
 router.post("/me/picture/upload-url", asyncRoute(async (req, res) => {
   const input = directUploadRequest.parse(req.body);
+  if (input.mimeType.toLowerCase() === "image/gif") {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: req.auth!.userId }, select: { animatedProfileUnlocked: true } });
+    if (!user.animatedProfileUnlocked) return res.status(403).json({ error: "Unlock animated profile pictures in the F4WE Shop first" });
+  }
   res.json(await beginDirectUpload("profile", req.auth!.userId, input.mimeType, input.size));
 }));
 
@@ -92,14 +113,41 @@ router.post("/me/picture/complete", asyncRoute(async (req, res) => {
 router.post("/me/picture", pictureUpload.single("file"), asyncRoute(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Image file is required" });
   const detected = await fileTypeFromBuffer(req.file.buffer);
-  if (!detected || !["image/jpeg", "image/png", "image/webp"].includes(detected.mime)) return res.status(415).json({ error: "Use a JPG, PNG, or WebP image" });
-  const current = await prisma.user.findUniqueOrThrow({ where: { id: req.auth!.userId }, select: { profilePicture: true } });
+  if (!detected || !["image/jpeg", "image/png", "image/webp", "image/gif"].includes(detected.mime)) return res.status(415).json({ error: "Use a JPG, PNG, WebP, or GIF image" });
+  const current = await prisma.user.findUniqueOrThrow({ where: { id: req.auth!.userId }, select: { profilePicture: true, animatedProfileUnlocked: true } });
+  if (detected.mime === "image/gif" && !current.animatedProfileUnlocked) return res.status(403).json({ error: "Unlock animated profile pictures in the F4WE Shop first" });
   const profilePicture = await saveImage("profile", req.file.buffer, detected.ext, detected.mime);
   try {
     await prisma.user.update({ where: { id: req.auth!.userId }, data: { profilePicture } });
   } catch (error) { await deleteImage(profilePicture, "profile"); throw error; }
   await deleteImage(current.profilePicture, "profile");
   res.json({ profilePicture });
+}));
+
+router.post("/me/banner/upload-url", asyncRoute(async (req, res) => {
+  const input = directUploadRequest.parse(req.body);
+  if (input.mimeType.toLowerCase() === "image/gif") {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: req.auth!.userId }, select: { animatedBannerUnlocked: true } });
+    if (!user.animatedBannerUnlocked) return res.status(403).json({ error: "Unlock animated banners in the F4WE Shop first" });
+  }
+  res.json(await beginDirectUpload("banner", req.auth!.userId, input.mimeType, input.size));
+}));
+
+router.post("/me/banner/complete", asyncRoute(async (req, res) => {
+  const { uploadToken } = directUploadCompletion.parse(req.body);
+  const current = await prisma.user.findUniqueOrThrow({ where: { id: req.auth!.userId }, select: { bannerUrl: true } });
+  const uploaded = await completeDirectUpload("banner", req.auth!.userId, uploadToken);
+  try { await prisma.user.update({ where: { id: req.auth!.userId }, data: { bannerUrl: uploaded.url } }); }
+  catch (error) { await deleteImage(uploaded.url, "banner"); throw error; }
+  await deleteImage(current.bannerUrl, "banner");
+  res.json({ bannerUrl: uploaded.url });
+}));
+
+router.delete("/me/banner", asyncRoute(async (req, res) => {
+  const current = await prisma.user.findUniqueOrThrow({ where: { id: req.auth!.userId }, select: { bannerUrl: true } });
+  await prisma.user.update({ where: { id: req.auth!.userId }, data: { bannerUrl: null } });
+  await deleteImage(current.bannerUrl, "banner");
+  res.status(204).end();
 }));
 
 router.get("/requests", asyncRoute(async (req, res) => {
@@ -153,7 +201,7 @@ router.get("/update-ideas", asyncRoute(async (req, res) => {
   res.json(await prisma.updateIdea.findMany({
     where: staff ? undefined : { userId: req.auth!.userId },
     orderBy: { createdDate: "desc" }, take: 300,
-    include: staff ? { user: { select: { id: true, username: true, rank: true, profilePicture: true } } } : undefined
+    include: { user: { select: { id: true, username: true, rank: true, profilePicture: true } } }
   }));
 }));
 

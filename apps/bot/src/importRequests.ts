@@ -8,6 +8,7 @@ import { fileTypeFromFile } from "file-type";
 import type { PrismaClient } from "@prisma/client";
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { env } from "./env.js";
+import { addToStaffPlaylist } from "./musicUpload.js";
 
 const maxBytes = 25 * 1024 * 1024;
 const uploadDir = path.resolve(env.API_UPLOAD_DIR);
@@ -235,6 +236,7 @@ export async function importQueuedRequests(prisma: PrismaClient) {
         const title = row.requestedTitle.trim(), artist = row.requestedArtist.trim();
         await prisma.$transaction(async tx => {
           const song = await tx.music.create({ data: { title, artist, filePath: storedReference! } });
+          await addToStaffPlaylist(tx, song.id);
           await tx.musicRequest.update({ where: { id: row.id }, data: { status: "Accepted", importedMusicId: song.id, processedDate: new Date() } });
           await tx.notification.create({ data: { userId: row.userId, title: "Music request imported", body: `${title} — ${artist} is now in F4WE.` } });
           await tx.logEvent.create({ data: { type: "MUSIC_UPLOAD", userId: row.userId, actionType: "music_request.imported", details: { requestId: row.id, musicId: song.id, title, artist } } });

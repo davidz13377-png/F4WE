@@ -11,6 +11,7 @@ import playlistRoutes from "./routes/playlists.js";
 import profileRoutes from "./routes/profile.js";
 import developerRoutes from "./routes/developer.js";
 import friendRoutes from "./routes/friends.js";
+import shopRoutes from "./routes/shop.js";
 import { env } from "./env.js";
 import { asyncRoute, errorHandler } from "./middleware/errors.js";
 import { openImage, usingR2Storage } from "./services/storage.js";
@@ -25,7 +26,7 @@ app.use(express.json({ limit: "256kb" }));
 if (usingR2Storage) {
   app.get("/media/:category/:filename", asyncRoute(async (req, res) => {
     const category = req.params.category;
-    if (category !== "profile" && category !== "playlist" && category !== "music-artwork") return res.status(404).json({ error: "Image not found" });
+    if (category !== "profile" && category !== "banner" && category !== "profile-design" && category !== "playlist" && category !== "music-artwork") return res.status(404).json({ error: "Image not found" });
     const image = await openImage(category, req.params.filename as string);
     if (!image) return res.status(404).json({ error: "Image not found" });
     res.setHeader("Content-Type", image.contentType);
@@ -35,6 +36,8 @@ if (usingR2Storage) {
   }));
 } else {
   app.use("/media/profile", express.static(path.resolve(env.UPLOAD_DIR, "profile"), { fallthrough: false, maxAge: "1d", immutable: true }));
+  app.use("/media/banner", express.static(path.resolve(env.UPLOAD_DIR, "banner"), { fallthrough: false, maxAge: "1d", immutable: true }));
+  app.use("/media/profile-design", express.static(path.resolve(env.UPLOAD_DIR, "profile-design"), { fallthrough: false, maxAge: "1d", immutable: true }));
   app.use("/media/playlist", express.static(path.resolve(env.UPLOAD_DIR, "playlist"), { fallthrough: false, maxAge: "1d", immutable: true }));
   app.use("/media/music-artwork", express.static(path.resolve(env.UPLOAD_DIR, "music-artwork"), { fallthrough: false, maxAge: "1d", immutable: true }));
 }
@@ -46,6 +49,7 @@ app.use("/api/playlists", playlistRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/developer", developerRoutes);
 app.use("/api/friends", friendRoutes);
+app.use("/api/shop", shopRoutes);
 app.get("/health", (_req, res) => res.json({ ok: true, service: "f4we-api" }));
 app.use((_req, res) => res.status(404).json({ error: "Route not found" }));
 app.use(errorHandler);

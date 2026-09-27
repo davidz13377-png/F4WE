@@ -21,12 +21,12 @@ export default function MusicManager() {
   const insets = useSafeAreaInsets();
   const [editing, setEditing] = useState<Song | null>(null), [title, setTitle] = useState(""), [artist, setArtist] = useState("");
   const [lyricsFile, setLyricsFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null), [lyricsType, setLyricsType] = useState<"timed" | "plain">("timed");
-  const [songs, setSongs] = useState<Song[]>([]), [query, setQuery] = useState(""), [busy, setBusy] = useState<string | null>(null), [error, setError] = useState("");
+  const [songs, setSongs] = useState<Song[]>([]), [total, setTotal] = useState(0), [query, setQuery] = useState(""), [busy, setBusy] = useState<string | null>(null), [error, setError] = useState("");
   const canDelete = !!user?.isOwner || user?.rank === "Admin" || user?.rank === "Developer";
   const allowed = !!user?.isOwner || user?.rank === "Moderator" || canDelete;
   const load = useCallback(async () => {
     if (!allowed) return;
-    try { setSongs(await api<Song[]>("/api/music?q=" + encodeURIComponent(query.trim()))); setError(""); }
+    try { const [items, count] = await Promise.all([api<Song[]>("/api/music?q=" + encodeURIComponent(query.trim())), api<{ count: number }>("/api/music/count")]); setSongs(items); setTotal(count.count); setError(""); }
     catch (e) { setError(e instanceof Error ? e.message : "Could not load music"); }
   }, [allowed, query]);
   useFocusEffect(useCallback(() => { const timer = setTimeout(() => void load(), 300); return () => clearTimeout(timer); }, [load]));
@@ -104,7 +104,7 @@ export default function MusicManager() {
       }).catch(e => Alert.alert("Could not remove lyrics", e.message)).finally(() => setBusy(null));
     } }]);
   };
-  return <Screen><Title subtitle="Moderator / Admin / Developer: edit song details and artwork.">Music Manager</Title><Input placeholder="Search songs or artists" maxLength={100} value={query} onChangeText={setQuery} />
+  return <Screen><View style={[ui.row, { alignItems: "flex-start", gap: 12 }]}><View style={{ flex: 1 }}><Title subtitle="Moderator / Admin / Developer: edit song details and artwork.">Music Manager</Title></View><View style={{ backgroundColor: colors.raised, borderRadius: 99, paddingHorizontal: 13, paddingVertical: 8 }}><Text style={{ color: colors.softRed, fontWeight: "900" }}>{total} songs</Text></View></View><Input placeholder="Search songs or artists" maxLength={100} value={query} onChangeText={setQuery} />
     {error ? <Text style={{ color: colors.red }}>{error}</Text> : null}
     {songs.map(song => <View key={song.id} style={[ui.row, { justifyContent: "space-between", gap: 14, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border }]}>
       <View style={{ flex: 1 }}><Text style={[ui.body, { fontWeight: "800" }]}>{song.title}</Text><Text style={ui.muted}>{song.artist || "Unknown artist"}</Text></View>

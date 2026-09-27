@@ -22,6 +22,9 @@ async function newUserId() {
 
 router.post("/register", asyncRoute(async (req, res) => {
   const input = registration.parse(req.body);
+  if (await prisma.user.findFirst({ where: { username: { equals: input.username, mode: "insensitive" } }, select: { id: true } })) {
+    return res.status(409).json({ error: "That username is already taken" });
+  }
   const passwordHash = await bcrypt.hash(input.password, 12);
   const id = await newUserId();
   const user = await prisma.$transaction(async tx => {
@@ -31,7 +34,7 @@ router.post("/register", asyncRoute(async (req, res) => {
     if (!key || key.used || key.usedCount >= key.usageLimit) throw Object.assign(new Error("Invalid or fully used access key"), { status: 400 });
     const created = await tx.user.create({
       data: { id, username: input.username, passwordHash, accessKeyUsed: input.accessKey },
-      select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, registrationDate: true, shareListening: true }
+      select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, bannerUrl: true, coins: true, activeProfileDesign: { select: { assetUrl: true } }, registrationDate: true, shareListening: true }
     });
     const nextCount = key.usedCount + 1;
     await tx.accessKey.update({ where: { key: input.accessKey }, data: {
@@ -40,17 +43,19 @@ router.post("/register", asyncRoute(async (req, res) => {
     } });
     return created;
   });
-  await audit("USER_REGISTRATION", user.id, "user.registered", { username: user.username, accessKey: input.accessKey });
-  res.status(201).json({ token: signToken(user.id, user.rank), user });
+  const rewardInvite = await prisma.rewardInvite.findUnique({ where: { accessKey: input.accessKey }, select: { buyerId: true } });
+  await audit("USER_REGISTRATION", user.id, "user.registered", { username: user.username, accessKey: input.accessKey, inviteProvidedByUserId: rewardInvite?.buyerId ?? null, rewardInvite: !!rewardInvite });
+  const { activeProfileDesign, ...details } = user;
+  res.status(201).json({ token: signToken(user.id, user.rank), user: { ...details, profileDesignUrl: activeProfileDesign?.assetUrl ?? null } });
 }));
 
 router.post("/login", asyncRoute(async (req, res) => {
   const input = credentials.parse(req.body);
-  const user = await prisma.user.findUnique({ where: { username: input.username } });
+  const user = await prisma.user.findFirst({ where: { username: { equals: input.username, mode: "insensitive" } }, include: { activeProfileDesign: { select: { assetUrl: true } } } });
   if (!user || !(await bcrypt.compare(input.password, user.passwordHash))) return res.status(401).json({ error: "Invalid username or password" });
   res.json({
     token: signToken(user.id, user.rank),
-    user: { id: user.id, username: user.username, rank: user.rank, isOwner: user.isOwner, profilePicture: user.profilePicture, registrationDate: user.registrationDate, shareListening: user.shareListening }
+    user: { id: user.id, username: user.username, rank: user.rank, isOwner: user.isOwner, profilePicture: user.profilePicture, bannerUrl: user.bannerUrl, coins: user.coins, profileDesignUrl: user.activeProfileDesign?.assetUrl ?? null, registrationDate: user.registrationDate, shareListening: user.shareListening }
   });
 }));
 

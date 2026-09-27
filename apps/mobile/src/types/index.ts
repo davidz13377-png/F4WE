@@ -1,8 +1,8 @@
 export type Rank = "Access" | "Moderator" | "Admin" | "Developer";
-export type User = { id: string; username: string; rank: Rank; isOwner?: boolean; profilePicture?: string | null; registrationDate?: string; shareListening?: boolean };
+export type User = { id: string; username: string; rank: Rank; isOwner?: boolean; profilePicture?: string | null; bannerUrl?: string | null; profileDesignUrl?: string | null; coins?: number; animatedProfileUnlocked?: boolean; animatedBannerUnlocked?: boolean; registrationDate?: string; shareListening?: boolean };
 export type Song = { id: string; title: string; artist?: string | null; artworkUrl?: string | null; duration?: number | null; streamUrl: string; liked?: boolean; hasLyrics?: boolean; lyricsSynced?: boolean };
 export type RotationSong = Song & { playCount: number };
-export type Playlist = { id: string; name: string; description?: string | null; artworkUrl?: string | null; creatorId: string; creator: User; isPublic: boolean; saved: boolean; trackCount: number; totalDuration?: number };
+export type Playlist = { id: string; name: string; description?: string | null; artworkUrl?: string | null; creatorId: string; creator: User; isPublic: boolean; isStaffPlaylist?: boolean; saved: boolean; trackCount: number; totalDuration?: number };
 export type PlaylistDetails = Playlist & { songs: Song[] };
 export type HistoryEntry = { kind: "song"; musicId: string; at: number };
 export type ReviewItem = { id: string; status: "Pending" | "Processing" | "Accepted" | "Rejected" | "Fixed"; requestDate?: string; reportDate?: string; songsRequested?: string; sourceUrl?: string | null; requestedTitle?: string | null; requestedArtist?: string | null; importedMusicId?: string | null; description?: string; rejectionReason?: string | null; adminResponse?: string | null; user?: User };
@@ -11,3 +11,5 @@ export type ListeningPresence = { musicId: string; title: string; artist: string
 export type Friend = User & { friendsSince: string; online: boolean; listening: ListeningPresence | null };
 export type FriendSearchResult = User & { relationship: "none" | "friend" | "sent" | "received" };
 export type FriendRequest = { id: string; senderId: string; receiverId: string; createdAt: string; sender: User };
+export type ListeningFollower = Pick<User, "id" | "username">;
+export type PublicProfile = User & { playlists: Playlist[] };

@@ -22,12 +22,14 @@ export function MiniPlayer() {
   const [lyrics, setLyrics] = useState<{ type: "plain" | "timed"; content: string } | null>(null);
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const lyricsScroll = useRef<ScrollView>(null);
+  const lyricLayouts = useRef<Record<number, { y: number; height: number }>>({});
+  const [lyricsViewport, setLyricsViewport] = useState(320);
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   useEffect(() => { setPreview(null); }, [player.active?.id]);
   useEffect(() => { if (openPlayer) setExpanded(true); }, [openPlayer]);
   useEffect(() => {
-    let live = true; setLyrics(null);
+    let live = true; setLyrics(null); lyricLayouts.current = {};
     if (!expanded || !player.active?.id) return;
     setLyricsLoading(true);
     void api<{ type: "plain" | "timed"; content: string }>(`/api/music/${encodeURIComponent(String(player.active.id))}/lyrics`)
@@ -39,8 +41,9 @@ export function MiniPlayer() {
   const currentLine = timedLines.reduce((found, line, index) => line.time <= player.position ? index : found, -1);
   useEffect(() => {
     if (currentLine < 0) return;
-    lyricsScroll.current?.scrollTo({ y: Math.max(0, currentLine * 38 - 100), animated: true });
-  }, [currentLine, active?.id]);
+    const layout = lyricLayouts.current[currentLine];
+    if (layout) lyricsScroll.current?.scrollTo({ y: Math.max(0, layout.y + layout.height / 2 - lyricsViewport / 2), animated: true });
+  }, [currentLine, active?.id, lyricsViewport]);
   if (!active) return null;
   const artworkSize = Math.min(width - 56, 350);
   const progress = player.duration > 0 ? Math.min(1, player.position / player.duration) : 0;
@@ -79,6 +82,7 @@ export function MiniPlayer() {
             <Text numberOfLines={2} style={styles.largeTitle}>{active.title}</Text>
             <Text style={styles.largeArtist}>{active.artist}</Text>
           </View>
+          {player.listeningFollowers.length ? <View style={styles.followersCard}><Ionicons name="people" size={18} color={colors.softRed} /><View style={{ flex: 1 }}><Text style={styles.followersTitle}>Listening with you</Text><Text style={styles.followersNames}>{player.listeningFollowers.map(item => item.username).join(", ")}</Text></View></View> : null}
           {player.error ? <Text accessibilityRole="alert" style={styles.errorBox}>{player.error}</Text> : null}
           {player.loading ? <Text style={styles.status}>Loading music…</Text> : null}
           <SeekBar key={String(active.id)} value={displayPosition} maximum={player.duration} buffered={player.buffered} label="Song position"
@@ -106,8 +110,8 @@ export function MiniPlayer() {
           <Text style={styles.hint}>Drag the timeline or tap it to jump to any moment.</Text>
           <View style={styles.lyricsCard}>
             <View style={styles.lyricsHeader}><Text style={styles.lyricsTitle}>Lyrics</Text>{lyrics?.type === "timed" ? <Text style={styles.syncedBadge}>SYNCED</Text> : null}</View>
-            {lyricsLoading ? <ActivityIndicator color={colors.softRed} /> : lyrics?.type === "plain" ? <Text style={styles.plainLyrics}>{lyrics.content}</Text> : timedLines.length ? <ScrollView ref={lyricsScroll} style={styles.lyricsScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
-              {timedLines.map((line, index) => <Text key={`${line.time}:${index}`} style={[styles.lyricLine, index === currentLine ? styles.lyricActive : null]}>{line.text || "♪"}</Text>)}
+            {lyricsLoading ? <ActivityIndicator color={colors.softRed} /> : lyrics?.type === "plain" ? <Text style={styles.plainLyrics}>{lyrics.content}</Text> : timedLines.length ? <ScrollView ref={lyricsScroll} style={styles.lyricsScroll} contentContainerStyle={{ paddingVertical: lyricsViewport / 2 }} onLayout={event => setLyricsViewport(event.nativeEvent.layout.height)} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+              {timedLines.map((line, index) => <Text key={`${line.time}:${index}`} onLayout={event => { lyricLayouts.current[index] = event.nativeEvent.layout; if (index === currentLine) lyricsScroll.current?.scrollTo({ y: Math.max(0, event.nativeEvent.layout.y + event.nativeEvent.layout.height / 2 - lyricsViewport / 2), animated: false }); }} style={[styles.lyricLine, index === currentLine ? styles.lyricActive : null]}>{line.text || "♪"}</Text>)}
             </ScrollView> : <Text style={styles.noLyrics}>Lyrics have not been added for this song yet.</Text>}
           </View>
         </ScrollView>
@@ -213,6 +217,8 @@ const styles = StyleSheet.create({
   transport: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginVertical: 22 },
   playButton: { width: 76, height: 76, borderRadius: 38, backgroundColor: colors.accent, alignItems: "center", justifyContent: "center" },
   hint: { color: colors.muted, fontSize: 12, textAlign: "center", marginTop: 2 },
+  followersCard: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: "#6E3439", backgroundColor: "#2C2023", borderRadius: 14, padding: 12, marginBottom: 10 },
+  followersTitle: { color: colors.text, fontWeight: "900", fontSize: 13 }, followersNames: { color: colors.softRed, fontSize: 12, marginTop: 2 },
   lyricsCard: { marginTop: 34, borderRadius: 20, backgroundColor: "#17191DEB", borderWidth: 1, borderColor: colors.border, padding: 18, minHeight: 180 },
   lyricsHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
   lyricsTitle: { color: colors.text, fontSize: 22, fontWeight: "900" },

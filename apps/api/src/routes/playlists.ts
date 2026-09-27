@@ -8,6 +8,7 @@ import { authenticate } from "../middleware/auth.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { songView } from "../services/catalog.js";
 import { beginDirectUpload, completeDirectUpload, deleteImage, saveImage } from "../services/storage.js";
+import { isStaff } from "../services/staffPlaylist.js";
 
 const router = Router();
 const pictureUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -15,16 +16,20 @@ const directUploadRequest = z.object({ mimeType: z.string().min(1).max(100), siz
 const directUploadCompletion = z.object({ uploadToken: z.string().min(1).max(5000) }).strict();
 router.use(authenticate);
 const input = z.object({ name: z.string().trim().min(1).max(100), description: z.string().trim().max(500).optional(), isPublic: z.boolean().default(false) });
-const accessible = (userId: string, seePrivate = false) => seePrivate ? {} : ({ OR: [{ isPublic: true }, { creatorId: userId }] });
+const accessible = (userId: string, seePrivate = false, staffAccess = false) => ({ AND: [
+  ...(staffAccess ? [] : [{ isStaffPlaylist: false }]),
+  ...(seePrivate ? [] : [{ OR: [{ isPublic: true }, { creatorId: userId }, ...(staffAccess ? [{ isStaffPlaylist: true }] : [])] }])
+] });
 const creator = { select: { id: true, username: true, rank: true } } as const;
 
 router.get("/", asyncRoute(async (req, res) => {
   const userId = req.auth!.userId;
   const seePrivate = req.auth!.isOwner || req.auth!.rank === Rank.Developer;
+  const staffAccess = isStaff(req.auth!.rank, req.auth!.isOwner);
   const q = z.string().trim().max(100).parse(req.query.q ?? "");
   const rows = await prisma.album.findMany({
-    where: { AND: [accessible(userId, seePrivate), ...(req.query.mine === "true" ? [{ creatorId: userId }] : []),
-      ...(req.query.library === "true" ? [{ OR: [{ creatorId: userId }, { savedBy: { some: { userId } } }] }] : []),
+    where: { AND: [accessible(userId, seePrivate, staffAccess), ...(req.query.mine === "true" ? [{ creatorId: userId, isStaffPlaylist: false }] : []),
+      ...(req.query.library === "true" ? [{ OR: [{ creatorId: userId }, { savedBy: { some: { userId } } }, ...(staffAccess ? [{ isStaffPlaylist: true }] : [])] }] : []),
       ...(q ? [{ name: { contains: q, mode: "insensitive" as const } }] : [])] },
     orderBy: { creationDate: "desc" },
     include: { creator, songs: { select: { music: { select: { duration: true } } } }, _count: { select: { songs: true } }, savedBy: { where: { userId }, select: { userId: true } } }
@@ -40,7 +45,7 @@ router.post("/", asyncRoute(async (req, res) => {
 
 router.patch("/:id", asyncRoute(async (req, res) => {
   const data = input.partial().strict().parse(req.body);
-  const result = await prisma.album.updateMany({ where: { id: req.params.id as string, creatorId: req.auth!.userId }, data });
+  const result = await prisma.album.updateMany({ where: { id: req.params.id as string, creatorId: req.auth!.userId, isStaffPlaylist: false }, data });
   if (!result.count) return res.status(404).json({ error: "Playlist not found or not owned by you" });
   if (data.isPublic === false) await prisma.savedAlbum.deleteMany({ where: { albumId: req.params.id as string, userId: { not: req.auth!.userId } } });
   res.json(await prisma.album.findUnique({ where: { id: req.params.id as string }, include: { creator } }));
@@ -49,8 +54,9 @@ router.patch("/:id", asyncRoute(async (req, res) => {
 router.get("/:id", asyncRoute(async (req, res) => {
   const userId = req.auth!.userId;
   const seePrivate = req.auth!.isOwner || req.auth!.rank === Rank.Developer;
+  const staffAccess = isStaff(req.auth!.rank, req.auth!.isOwner);
   const playlist = await prisma.album.findFirst({
-    where: { id: req.params.id as string, ...accessible(userId, seePrivate) },
+    where: { id: req.params.id as string, ...accessible(userId, seePrivate, staffAccess) },
     include: { creator, savedBy: { where: { userId }, select: { userId: true } },
       songs: { orderBy: [{ order: "asc" }, { musicId: "asc" }], include: { music: { include: { favorites: { where: { userId }, select: { userId: true } } } } } } }
   });
@@ -63,6 +69,7 @@ router.post("/:id/picture/upload-url", asyncRoute(async (req, res) => {
   const playlist = await prisma.album.findUnique({ where: { id: req.params.id as string } });
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
   if (playlist.creatorId !== req.auth!.userId) return res.status(403).json({ error: "Only the creator can change this playlist" });
+  if (playlist.isStaffPlaylist) return res.status(403).json({ error: "The Staff Playlist is maintained automatically" });
   const input = directUploadRequest.parse(req.body);
   res.json(await beginDirectUpload("playlist", req.auth!.userId, input.mimeType, input.size));
 }));
@@ -71,6 +78,7 @@ router.post("/:id/picture/complete", asyncRoute(async (req, res) => {
   const playlist = await prisma.album.findUnique({ where: { id: req.params.id as string } });
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
   if (playlist.creatorId !== req.auth!.userId) return res.status(403).json({ error: "Only the creator can change this playlist" });
+  if (playlist.isStaffPlaylist) return res.status(403).json({ error: "The Staff Playlist is maintained automatically" });
   const { uploadToken } = directUploadCompletion.parse(req.body);
   const uploaded = await completeDirectUpload("playlist", req.auth!.userId, uploadToken);
   try {
@@ -87,6 +95,7 @@ router.post("/:id/picture", pictureUpload.single("file"), asyncRoute(async (req,
   const playlist = await prisma.album.findUnique({ where: { id: req.params.id as string } });
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
   if (playlist.creatorId !== req.auth!.userId) return res.status(403).json({ error: "Only the creator can change this playlist" });
+  if (playlist.isStaffPlaylist) return res.status(403).json({ error: "The Staff Playlist is maintained automatically" });
   if (!req.file) return res.status(400).json({ error: "Image file is required" });
   const detected = await fileTypeFromBuffer(req.file.buffer);
   if (!detected || !["image/jpeg", "image/png", "image/webp"].includes(detected.mime)) return res.status(415).json({ error: "Use a JPG, PNG, or WebP image" });
@@ -102,6 +111,7 @@ router.delete("/:id/picture", asyncRoute(async (req, res) => {
   const playlist = await prisma.album.findUnique({ where: { id: req.params.id as string } });
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
   if (playlist.creatorId !== req.auth!.userId) return res.status(403).json({ error: "Only the creator can change this playlist" });
+  if (playlist.isStaffPlaylist) return res.status(403).json({ error: "The Staff Playlist is maintained automatically" });
   await prisma.album.update({ where: { id: playlist.id }, data: { artworkUrl: null } });
   await deleteImage(playlist.artworkUrl, "playlist");
   res.status(204).end();
@@ -113,6 +123,7 @@ router.post("/:id/songs", asyncRoute(async (req, res) => {
   const playlist = await prisma.album.findUnique({ where: { id: albumId } });
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
   if (playlist.creatorId !== req.auth!.userId) return res.status(403).json({ error: "Only the creator can change this playlist" });
+  if (playlist.isStaffPlaylist) return res.status(403).json({ error: "The Staff Playlist is maintained automatically" });
   if (!await prisma.music.findUnique({ where: { id: musicId }, select: { id: true } })) return res.status(404).json({ error: "Song not found" });
   await prisma.$transaction(async tx => {
     // Lock the parent so concurrent additions cannot exceed the limit or reorder songs.
@@ -131,6 +142,7 @@ router.delete("/:id/songs/:musicId", asyncRoute(async (req, res) => {
   const playlist = await prisma.album.findUnique({ where: { id: albumId } });
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
   if (playlist.creatorId !== req.auth!.userId) return res.status(403).json({ error: "Only the creator can change this playlist" });
+  if (playlist.isStaffPlaylist) return res.status(403).json({ error: "The Staff Playlist is maintained automatically" });
   await prisma.albumSong.deleteMany({ where: { albumId, musicId: req.params.musicId as string } });
   res.status(204).end();
 }));
@@ -138,7 +150,8 @@ router.delete("/:id/songs/:musicId", asyncRoute(async (req, res) => {
 router.post("/:id/save", asyncRoute(async (req, res) => {
   const userId = req.auth!.userId, albumId = req.params.id as string;
   const seePrivate = req.auth!.isOwner || req.auth!.rank === Rank.Developer;
-  if (!await prisma.album.findFirst({ where: { id: albumId, ...accessible(userId, seePrivate) }, select: { id: true } })) return res.status(404).json({ error: "Playlist not found" });
+  const staffAccess = isStaff(req.auth!.rank, req.auth!.isOwner);
+  if (!await prisma.album.findFirst({ where: { id: albumId, isStaffPlaylist: false, ...accessible(userId, seePrivate, staffAccess) }, select: { id: true } })) return res.status(404).json({ error: "Playlist not found" });
   await prisma.savedAlbum.upsert({ where: { userId_albumId: { userId, albumId } }, create: { userId, albumId }, update: {} });
   res.status(204).end();
 }));
@@ -149,7 +162,7 @@ router.delete("/:id/save", asyncRoute(async (req, res) => {
 }));
 
 router.delete("/:id", asyncRoute(async (req, res) => {
-  const result = await prisma.album.deleteMany({ where: { id: req.params.id as string, creatorId: req.auth!.userId } });
+  const result = await prisma.album.deleteMany({ where: { id: req.params.id as string, creatorId: req.auth!.userId, isStaffPlaylist: false } });
   if (!result.count) return res.status(404).json({ error: "Playlist not found or not owned by you" });
   res.status(204).end();
 }));

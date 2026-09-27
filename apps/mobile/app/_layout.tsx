@@ -23,6 +23,9 @@ export default function RootLayout() {
     <Stack.Screen name="profile/developer" options={{ title: "Dev Portal" }} />
     <Stack.Screen name="profile/uploader" options={{ title: "Music Uploader" }} />
     <Stack.Screen name="profile/music-manager" options={{ title: "Music Manager" }} />
+    <Stack.Screen name="profile/shop" options={{ title: "F4WE Shop" }} />
+    <Stack.Screen name="profile/owner" options={{ title: "Owner Portal" }} />
+    <Stack.Screen name="user/[id]" options={{ title: "Profile" }} />
     <Stack.Screen name="favorites" options={{ title: "Favorites" }} />
     <Stack.Screen name="friends" options={{ title: "Friends" }} />
     <Stack.Screen name="playlist/[id]" options={{ title: "Playlist" }} />

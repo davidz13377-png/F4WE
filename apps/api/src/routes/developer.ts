@@ -15,10 +15,10 @@ router.get("/users", asyncRoute(async (req, res) => {
   const q = z.string().max(100).catch("").parse(req.query.q ?? "");
   const users = await prisma.user.findMany({
     where: q ? { OR: [{ username: { contains: q, mode: "insensitive" } }, { id: { contains: q } }] } : undefined,
-    select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, registrationDate: true },
+    select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, registrationDate: true, activeProfileDesign: { select: { assetUrl: true } } },
     orderBy: { registrationDate: "desc" }, take: 200
   });
-  res.json(users);
+  res.json(users.map(({ activeProfileDesign, ...user }) => ({ ...user, profileDesignUrl: activeProfileDesign?.assetUrl ?? null })));
 }));
 
 router.patch("/users/:id/rank", asyncRoute(async (req, res) => {
@@ -26,6 +26,7 @@ router.patch("/users/:id/rank", asyncRoute(async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.params.id as string } });
   if (!user) return res.status(404).json({ error: "User not found" });
   if (user.isOwner) return res.status(403).json({ error: "Owner accounts cannot be modified" });
+  if (user.id === req.auth!.userId && !req.auth!.isOwner) return res.status(403).json({ error: "Only an Owner can remove your own Developer rank" });
   const updated = await prisma.$transaction(async tx => {
     const changed = await tx.user.updateMany({ where: { id: user.id, isOwner: false }, data: { rank } });
     if (!changed.count) throw Object.assign(new Error("Owner accounts cannot be modified"), { status: 403 });
@@ -47,10 +48,11 @@ router.patch("/users/:id", asyncRoute(async (req, res) => {
   if (duplicate) return res.status(409).json({ error: "That username is already taken" });
   const changed = await prisma.user.updateMany({ where: { id: current.id, isOwner: false }, data: { username } });
   if (!changed.count) return res.status(403).json({ error: "Owner accounts cannot be modified" });
-  const updated = await prisma.user.findUniqueOrThrow({ where: { id: current.id }, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, registrationDate: true } });
+  const updated = await prisma.user.findUniqueOrThrow({ where: { id: current.id }, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, registrationDate: true, activeProfileDesign: { select: { assetUrl: true } } } });
   await audit("DEBUG", current.id, "user.renamed", { oldUsername: current.username, username, changedBy: req.auth!.userId });
   notifyUser(current.id, "profileChanged", { username });
-  res.json(updated);
+  const { activeProfileDesign, ...details } = updated;
+  res.json({ ...details, profileDesignUrl: activeProfileDesign?.assetUrl ?? null });
 }));
 
 router.delete("/users/:id/profile-picture", asyncRoute(async (req, res) => {

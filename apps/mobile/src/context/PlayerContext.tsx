@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type PropsWithC
 import { AppState, Platform } from "react-native";
 import TrackPlayer, { AndroidAudioContentType, AppKilledPlaybackBehavior, Capability, Event, RepeatMode, State, useActiveTrack, usePlaybackState, useProgress, useTrackPlayerEvents, type Track } from "react-native-track-player";
 import { API_URL, api, currentToken } from "../lib/api";
-import type { ListeningPresence, Song } from "../types";
+import type { ListeningFollower, ListeningPresence, Song } from "../types";
 import { useLibrary } from "./LibraryContext";
 import { useAuth } from "./AuthContext";
 import { F4WEAlert as Alert } from "../components/F4WEAlert";
@@ -55,7 +55,7 @@ type PlayOptions = { queueControls?: boolean; following?: boolean };
 type PlayerValue = {
   active?: Track; playing: boolean; loading: boolean; error: string | null;
   position: number; duration: number; buffered: number; volume: number;
-  shuffle: boolean; repeat: boolean; queueControls: boolean; followingUserId: string | null;
+  shuffle: boolean; repeat: boolean; queueControls: boolean; followingUserId: string | null; listeningFollowers: ListeningFollower[];
   play(song: Song, queue?: Song[], options?: PlayOptions): Promise<void>; toggle(): Promise<void>;
   next(): Promise<void>; previous(): Promise<void>; seek(position: number): Promise<void>; setVolume(volume: number): Promise<void>;
   toggleShuffle(): Promise<void>; toggleRepeat(): Promise<void>;
@@ -77,6 +77,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const [shuffle, setShuffle] = useState(false), [repeat, setRepeat] = useState(false), [queueControls, setQueueControls] = useState(false);
   const queueControlsRef = useRef(false), originalQueue = useRef<Song[]>([]);
   const [followingUserId, setFollowingUserId] = useState<string | null>(null);
+  const [listeningFollowers, setListeningFollowers] = useState<ListeningFollower[]>([]);
   const followingRef = useRef<string | null>(null);
   const [playSession, setPlaySession] = useState<{ musicId: string; id: string } | null>(null);
   const [editedMetadata, setEditedMetadata] = useState<Record<string, { title: string; artist: string }>>({});
@@ -106,9 +107,12 @@ export function PlayerProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (!playSession || playback.state !== State.Playing || String(active?.id) !== playSession.musicId) return;
+    let lastHeartbeat = Date.now();
     const timer = setInterval(() => {
+      const now = Date.now(), seconds = Math.max(1, Math.min(600, Math.round((now - lastHeartbeat) / 1000)));
+      lastHeartbeat = now;
       void api(`/api/music/${encodeURIComponent(playSession.musicId)}/play/${encodeURIComponent(playSession.id)}`, {
-        method: "PATCH", body: JSON.stringify({ seconds: 10 })
+        method: "PATCH", body: JSON.stringify({ seconds })
       }).catch(() => undefined);
     }, 10_000);
     return () => clearInterval(timer);
@@ -182,6 +186,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (!socket) return;
+    const followers = (items: ListeningFollower[]) => setListeningFollowers(Array.isArray(items) ? items : []);
     const onState = (state: ListeningPresence & { userId: string }) => {
       if (state.userId !== followingRef.current) return;
       void (async () => {
@@ -202,8 +207,8 @@ export function PlayerProvider({ children }: PropsWithChildren) {
       if (userId !== followingRef.current) return;
       leaveFollowing(); Alert.alert("Listening together ended", "Your friend stopped sharing or went offline.");
     };
-    socket.on("listening:state", onState); socket.on("listening:unavailable", unavailable);
-    return () => { socket.off("listening:state", onState); socket.off("listening:unavailable", unavailable); };
+    socket.on("listening:state", onState); socket.on("listening:unavailable", unavailable); socket.on("listening:followers", followers);
+    return () => { socket.off("listening:state", onState); socket.off("listening:unavailable", unavailable); socket.off("listening:followers", followers); setListeningFollowers([]); };
   }, [socket]);
 
   const followUser = async (userId: string) => {
@@ -271,7 +276,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     active: active ? { ...active, ...(editedMetadata[String(active.id)] || {}) } : active,
     playing: playback.state === State.Playing, loading: starting || playback.state === State.Loading || playback.state === State.Buffering,
     error, ...progress, duration: progress.duration || active?.duration || 0, volume,
-    shuffle, repeat, queueControls, followingUserId,
+    shuffle, repeat, queueControls, followingUserId, listeningFollowers,
     play, toggle, next, previous, seek, setVolume, toggleShuffle, toggleRepeat, followUser, stopFollowing: leaveFollowing, removeQueuedSong, updateSongMetadata
   }}>{children}</PlayerContext.Provider>;
 }

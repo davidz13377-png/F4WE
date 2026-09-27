@@ -16,9 +16,9 @@ export function Title({ children, subtitle }: PropsWithChildren<{ subtitle?: str
   return <View style={{ marginBottom: 22 }}><Text style={styles.title}>{children}</Text>{subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}</View>;
 }
 export function Input(props: TextInputProps) { return <TextInput placeholderTextColor={colors.muted} {...props} style={[styles.input, props.style]} />; }
-export function Button({ title, onPress, loading, tone = "green", icon }: { title: string; onPress(): void; loading?: boolean; tone?: "green" | "dark" | "red"; icon?: keyof typeof Ionicons.glyphMap }) {
+export function Button({ title, onPress, loading, disabled, tone = "green", icon }: { title: string; onPress(): void; loading?: boolean; disabled?: boolean; tone?: "green" | "dark" | "red"; icon?: keyof typeof Ionicons.glyphMap }) {
   const foreground = tone === "green" ? colors.accentText : colors.text;
-  return <Pressable accessibilityRole="button" onPress={onPress} disabled={loading} style={({ pressed }) => [styles.button, { backgroundColor: tone === "green" ? colors.accent : tone === "red" ? colors.red : colors.raised, opacity: pressed || loading ? .7 : 1 }]}>
+  return <Pressable accessibilityRole="button" onPress={onPress} disabled={loading || disabled} style={({ pressed }) => [styles.button, { backgroundColor: tone === "green" ? colors.accent : tone === "red" ? colors.red : colors.raised, opacity: pressed || loading || disabled ? .55 : 1 }]}>
     {loading ? <ActivityIndicator color={foreground} /> : <>{icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}<Text style={[styles.buttonText, { color: foreground }]}>{title}</Text></>}
   </Pressable>;
 }

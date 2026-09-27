@@ -43,6 +43,7 @@ function requireMock(name) {
   if (name === 'node:child_process') return { spawn };
   if (name === 'file-type') return { fileTypeFromFile: async () => ({ mime: 'audio/mpeg' }) };
   if (name === './env.js') return { env: { API_UPLOAD_DIR: uploadDir, YT_DLP_BIN: 'mock-yt-dlp', FFMPEG_BIN: 'mock-ffmpeg', YT_DLP_POT_PROVIDER_HOME: '/opt/test-pot-provider', YT_DLP_COOKIES_BASE64: Buffer.from('# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\ttest\tvalue\n').toString('base64') } };
+  if (name === './musicUpload.js') return { addToStaffPlaylist: async () => undefined };
   return require(name);
 }
 vm.runInNewContext(js, { module: moduleOut, exports: moduleOut.exports, require: requireMock, URL, Buffer, Date, Promise, console, setTimeout, clearTimeout, process });
