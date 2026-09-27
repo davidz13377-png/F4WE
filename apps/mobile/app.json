@@ -37,7 +37,7 @@
       "expo-image"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": false
     },
     "extra": {
       "apiUrl": "https://f4we-api-production.up.railway.app",

@@ -1,0 +1,12 @@
+diff --git a/node_modules/multer/package.json b/node_modules/multer/package.json
+--- a/node_modules/multer/package.json
++++ b/node_modules/multer/package.json
+@@ -28,7 +28,7 @@
+   "dependencies": {
+     "append-field": "^1.0.0",
+     "busboy": "^1.6.0",
+-    "type-is": "^1.6.18"
++    "type-is": "2.1.0"
+   },
+   "devDependencies": {
+     "express": "^4.22.2",

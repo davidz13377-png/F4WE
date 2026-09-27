@@ -35,7 +35,12 @@ router.get("/", asyncRoute(async (req, res) => {
   const [user, products, designs, owned, invites, settings] = await Promise.all([
     prisma.user.findUniqueOrThrow({ where: { id: userId }, select: profileSelect }),
     prisma.shopProduct.findMany({ orderBy: { key: "asc" } }),
-    prisma.profileDesign.findMany({ where: manage ? undefined : { active: true }, orderBy: [{ isLimited: "desc" }, { createdAt: "desc" }] }),
+    prisma.profileDesign.findMany({
+      // Retired designs disappear for new buyers, while everyone who bought one
+      // keeps it in their collection and can equip it again later.
+      where: manage ? undefined : { OR: [{ active: true }, { owners: { some: { userId } } }] },
+      orderBy: [{ isLimited: "desc" }, { createdAt: "desc" }]
+    }),
     prisma.ownedProfileDesign.findMany({ where: { userId }, select: { designId: true } }),
     prisma.rewardInvite.findMany({ where: { buyerId: userId }, select: { accessKey: true, createdAt: true, access: { select: { used: true, usedCount: true } } }, orderBy: { createdAt: "desc" } }),
     req.auth!.isOwner ? rewardSettings() : Promise.resolve(null)
@@ -161,8 +166,10 @@ router.patch("/owner/designs/:id", ownerOnly, asyncRoute(async (req, res) => {
 router.delete("/owner/designs/:id", ownerOnly, asyncRoute(async (req, res) => {
   const design = await prisma.profileDesign.findUnique({ where: { id: req.params.id as string } });
   if (!design) return res.status(404).json({ error: "Design not found" });
-  await prisma.profileDesign.delete({ where: { id: design.id } });
-  await deleteImage(design.assetUrl, "profile-design");
+  // Never delete purchased designs or their files. Removing a design only
+  // retires it from sale; existing owners retain permanent access.
+  await prisma.profileDesign.update({ where: { id: design.id }, data: { active: false } });
+  await audit("DEBUG", req.auth!.userId, "shop.design_retired", { designId: design.id, name: design.name });
   res.status(204).end();
 }));
 
