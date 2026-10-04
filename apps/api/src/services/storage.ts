@@ -247,11 +247,26 @@ export async function deleteMusic(reference: string) {
 
 function runFfmpeg(args: string[]) {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", "-y", ...args], { stdio: ["ignore", "ignore", "pipe"] });
     let error = "";
     child.stderr.on("data", chunk => { error += String(chunk).slice(0, 4000); });
     child.once("error", reject);
     child.once("close", code => code === 0 ? resolve() : reject(new Error(`Audio cut failed${error ? `: ${error.trim()}` : ""}`)));
+  });
+}
+
+function probeAudioDuration(filePath: string) {
+  return new Promise<number>((resolve, reject) => {
+    const child = spawn("ffprobe", ["-v", "error", "-select_streams", "a:0", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", filePath], { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "", error = "";
+    child.stdout.on("data", chunk => { output += String(chunk); });
+    child.stderr.on("data", chunk => { error += String(chunk).slice(0, 4000); });
+    child.once("error", reject);
+    child.once("close", code => {
+      const duration = Number.parseFloat(output.trim());
+      if (code === 0 && Number.isFinite(duration) && duration > 0) resolve(duration);
+      else reject(new Error(`Could not inspect cut audio${error ? `: ${error.trim()}` : ""}`));
+    });
   });
 }
 
@@ -262,11 +277,18 @@ export async function cutMusic(reference: string, startSeconds: number, endSecon
     const source = await openMusic(reference);
     if (!source) throw new Error("Music file could not be opened");
     await pipeline(source.body, (await import("node:fs")).createWriteStream(input));
-    await runFfmpeg(["-ss", String(startSeconds), "-to", String(endSeconds), "-i", input, "-vn", "-codec:a", "libmp3lame", "-q:a", "2", output]);
+    const requestedDuration = endSeconds - startSeconds;
+    // Seek after opening the input for frame-accurate cuts. `-t` is a duration;
+    // unlike an input-side `-to`, it cannot accidentally create an empty file
+    // when the selected start is greater than zero.
+    await runFfmpeg(["-i", input, "-ss", String(startSeconds), "-t", String(requestedDuration), "-map", "0:a:0", "-vn", "-codec:a", "libmp3lame", "-q:a", "2", "-write_xing", "1", output]);
     const buffer = await fs.readFile(output);
+    if (buffer.length < 1024) throw new Error("The cut output is empty");
     if ((await fileTypeFromBuffer(buffer))?.mime !== "audio/mpeg") throw new Error("The cut output is not a valid MP3");
-    const duration = mp3DurationSeconds(buffer);
-    if (!duration) throw new Error("The cut output is empty");
+    // ffprobe understands Xing/VBR headers and encoder padding. The former
+    // custom frame counter rejected some valid MP3 outputs as empty.
+    const measuredDuration = await probeAudioDuration(output);
+    const duration = Math.max(1, Math.round(measuredDuration));
     return { reference: await saveMusic(buffer), duration };
   } finally {
     await fs.rm(directory, { recursive: true, force: true });

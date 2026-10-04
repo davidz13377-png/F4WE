@@ -23,7 +23,7 @@ enum ReviewStatus {
 }
 
 model User {
-  id                      String               @id @db.Char(16)
+  id                      String               @id @db.VarChar(32)
   username                String               @unique @db.VarChar(32)
   passwordHash            String
   rank                    Rank                 @default(Access)
@@ -87,7 +87,7 @@ model Music {
   artworkUrl   String?
   lyrics       String?
   lyricsSynced Boolean     @default(false)
-  uploaderId   String?     @db.Char(16)
+  uploaderId   String?     @db.VarChar(32)
   uploadDate   DateTime    @default(now())
   releaseDate  DateTime?
   normalizedTitle  String  @default("")
@@ -102,7 +102,7 @@ model Music {
 
 model MusicPlay {
   id              String    @id @default(cuid())
-  userId          String    @db.Char(16)
+  userId          String    @db.VarChar(32)
   musicId         String
   playedAt        DateTime  @default(now())
   listenedSeconds Int       @default(0)
@@ -116,8 +116,8 @@ model MusicPlay {
 
 model FriendRequest {
   id         String   @id @default(cuid())
-  senderId   String   @db.Char(16)
-  receiverId String   @db.Char(16)
+  senderId   String   @db.VarChar(32)
+  receiverId String   @db.VarChar(32)
   createdAt  DateTime @default(now())
   sender     User     @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
   receiver   User     @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
@@ -127,8 +127,8 @@ model FriendRequest {
 }
 
 model Friendship {
-  userId    String   @db.Char(16)
-  friendId  String   @db.Char(16)
+  userId    String   @db.VarChar(32)
+  friendId  String   @db.VarChar(32)
   createdAt DateTime @default(now())
   user      User     @relation("FriendshipOwner", fields: [userId], references: [id], onDelete: Cascade)
   friend    User     @relation("FriendshipTarget", fields: [friendId], references: [id], onDelete: Cascade)
@@ -142,7 +142,7 @@ model Album {
   name            String
   description     String?
   artworkUrl      String?
-  creatorId       String       @db.Char(16)
+  creatorId       String       @db.VarChar(32)
   creationDate    DateTime     @default(now())
   isPublic        Boolean      @default(false)
   isStaffPlaylist Boolean      @default(false)
@@ -156,7 +156,7 @@ model Album {
 
 model PlaylistCollaborator {
   albumId  String
-  userId   String   @db.Char(16)
+  userId   String   @db.VarChar(32)
   addedAt  DateTime @default(now())
   album    Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -176,7 +176,7 @@ model AlbumSong {
 }
 
 model Favorite {
-  userId    String   @db.Char(16)
+  userId    String   @db.VarChar(32)
   musicId   String
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -186,7 +186,7 @@ model Favorite {
 }
 
 model SavedAlbum {
-  userId    String   @db.Char(16)
+  userId    String   @db.VarChar(32)
   albumId   String
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -197,7 +197,7 @@ model SavedAlbum {
 
 model MusicRequest {
   id              String       @id @default(cuid())
-  userId          String       @db.Char(16)
+  userId          String       @db.VarChar(32)
   songsRequested  String
   sourceUrl       String?
   requestedTitle  String?
@@ -213,7 +213,7 @@ model MusicRequest {
 
 model BugReport {
   id            String       @id @default(cuid())
-  userId        String       @db.Char(16)
+  userId        String       @db.VarChar(32)
   description   String
   status        ReviewStatus @default(Pending)
   adminResponse String?
@@ -224,7 +224,7 @@ model BugReport {
 
 model UpdatePost {
   id          String    @id @default(cuid())
-  developerId String    @db.Char(16)
+  developerId String    @db.VarChar(32)
   content     String
   postedDate  DateTime  @default(now())
   editedDate  DateTime?
@@ -233,7 +233,7 @@ model UpdatePost {
 
 model UpdateIdea {
   id          String   @id @default(cuid())
-  userId      String   @db.Char(16)
+  userId      String   @db.VarChar(32)
   content     String
   createdDate DateTime @default(now())
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -241,7 +241,7 @@ model UpdateIdea {
 
 model Notification {
   id        String   @id @default(cuid())
-  userId    String   @db.Char(16)
+  userId    String   @db.VarChar(32)
   title     String
   body      String
   read      Boolean  @default(false)
@@ -251,7 +251,7 @@ model Notification {
 
 model PushToken {
   token     String   @id
-  userId    String   @db.Char(16)
+  userId    String   @db.VarChar(32)
   platform  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -262,10 +262,10 @@ model PushToken {
 
 model UserRanksHistory {
   id         String   @id @default(cuid())
-  userId     String   @db.Char(16)
+  userId     String   @db.VarChar(32)
   oldRank    Rank
   newRank    Rank
-  changedBy  String?  @db.Char(16)
+  changedBy  String?  @db.VarChar(32)
   actorLabel String?
   changeDate DateTime @default(now())
   user       User     @relation("ChangedUser", fields: [userId], references: [id], onDelete: Cascade)
@@ -306,14 +306,14 @@ model ProfileDesign {
   isLimited   Boolean              @default(false)
   active      Boolean              @default(true)
   createdAt   DateTime             @default(now())
-  createdById String               @db.Char(16)
+  createdById String               @db.VarChar(32)
   createdBy   User                 @relation("ProfileDesignCreator", fields: [createdById], references: [id], onDelete: Cascade)
   owners      OwnedProfileDesign[]
   activeUsers User[]               @relation("ActiveProfileDesign")
 }
 
 model OwnedProfileDesign {
-  userId      String        @db.Char(16)
+  userId      String        @db.VarChar(32)
   designId    String
   purchasedAt DateTime      @default(now())
   pricePaid   Int
@@ -325,10 +325,10 @@ model OwnedProfileDesign {
 
 model CoinTransaction {
   id        String   @id @default(cuid())
-  userId    String   @db.Char(16)
+  userId    String   @db.VarChar(32)
   amount    Int
   reason    String
-  actorId   String?  @db.Char(16)
+  actorId   String?  @db.VarChar(32)
   createdAt DateTime @default(now())
   user      User     @relation("CoinOwner", fields: [userId], references: [id], onDelete: Cascade)
   actor     User?    @relation("CoinActor", fields: [actorId], references: [id], onDelete: SetNull)
@@ -338,7 +338,7 @@ model CoinTransaction {
 
 model RewardInvite {
   id        String    @id @default(cuid())
-  buyerId   String    @db.Char(16)
+  buyerId   String    @db.VarChar(32)
   accessKey String    @unique @db.VarChar(64)
   createdAt DateTime  @default(now())
   buyer     User      @relation(fields: [buyerId], references: [id], onDelete: Cascade)

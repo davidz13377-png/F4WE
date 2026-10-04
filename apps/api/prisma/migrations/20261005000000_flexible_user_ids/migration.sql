@@ -1,0 +1,76 @@
+-- App IDs may be custom numeric values between 4 and 32 digits. Convert the
+-- fixed-width CHAR(16) key and every referencing column to VARCHAR(32).
+-- Foreign keys are recreated with their original delete/update behavior.
+
+ALTER TABLE "Music" DROP CONSTRAINT IF EXISTS "Music_uploaderId_fkey";
+ALTER TABLE "MusicPlay" DROP CONSTRAINT IF EXISTS "MusicPlay_userId_fkey";
+ALTER TABLE "FriendRequest" DROP CONSTRAINT IF EXISTS "FriendRequest_senderId_fkey";
+ALTER TABLE "FriendRequest" DROP CONSTRAINT IF EXISTS "FriendRequest_receiverId_fkey";
+ALTER TABLE "Friendship" DROP CONSTRAINT IF EXISTS "Friendship_userId_fkey";
+ALTER TABLE "Friendship" DROP CONSTRAINT IF EXISTS "Friendship_friendId_fkey";
+ALTER TABLE "Album" DROP CONSTRAINT IF EXISTS "Album_creatorId_fkey";
+ALTER TABLE "PlaylistCollaborator" DROP CONSTRAINT IF EXISTS "PlaylistCollaborator_userId_fkey";
+ALTER TABLE "Favorite" DROP CONSTRAINT IF EXISTS "Favorite_userId_fkey";
+ALTER TABLE "SavedAlbum" DROP CONSTRAINT IF EXISTS "SavedAlbum_userId_fkey";
+ALTER TABLE "MusicRequest" DROP CONSTRAINT IF EXISTS "MusicRequest_userId_fkey";
+ALTER TABLE "BugReport" DROP CONSTRAINT IF EXISTS "BugReport_userId_fkey";
+ALTER TABLE "UpdatePost" DROP CONSTRAINT IF EXISTS "UpdatePost_developerId_fkey";
+ALTER TABLE "UpdateIdea" DROP CONSTRAINT IF EXISTS "UpdateIdea_userId_fkey";
+ALTER TABLE "Notification" DROP CONSTRAINT IF EXISTS "Notification_userId_fkey";
+ALTER TABLE "PushToken" DROP CONSTRAINT IF EXISTS "PushToken_userId_fkey";
+ALTER TABLE "UserRanksHistory" DROP CONSTRAINT IF EXISTS "UserRanksHistory_userId_fkey";
+ALTER TABLE "UserRanksHistory" DROP CONSTRAINT IF EXISTS "UserRanksHistory_changedBy_fkey";
+ALTER TABLE "ProfileDesign" DROP CONSTRAINT IF EXISTS "ProfileDesign_createdById_fkey";
+ALTER TABLE "OwnedProfileDesign" DROP CONSTRAINT IF EXISTS "OwnedProfileDesign_userId_fkey";
+ALTER TABLE "CoinTransaction" DROP CONSTRAINT IF EXISTS "CoinTransaction_userId_fkey";
+ALTER TABLE "CoinTransaction" DROP CONSTRAINT IF EXISTS "CoinTransaction_actorId_fkey";
+ALTER TABLE "RewardInvite" DROP CONSTRAINT IF EXISTS "RewardInvite_buyerId_fkey";
+
+ALTER TABLE "User" ALTER COLUMN "id" TYPE VARCHAR(32) USING RTRIM("id");
+ALTER TABLE "Music" ALTER COLUMN "uploaderId" TYPE VARCHAR(32) USING RTRIM("uploaderId");
+ALTER TABLE "MusicPlay" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "FriendRequest" ALTER COLUMN "senderId" TYPE VARCHAR(32) USING RTRIM("senderId");
+ALTER TABLE "FriendRequest" ALTER COLUMN "receiverId" TYPE VARCHAR(32) USING RTRIM("receiverId");
+ALTER TABLE "Friendship" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "Friendship" ALTER COLUMN "friendId" TYPE VARCHAR(32) USING RTRIM("friendId");
+ALTER TABLE "Album" ALTER COLUMN "creatorId" TYPE VARCHAR(32) USING RTRIM("creatorId");
+ALTER TABLE "PlaylistCollaborator" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "Favorite" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "SavedAlbum" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "MusicRequest" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "BugReport" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "UpdatePost" ALTER COLUMN "developerId" TYPE VARCHAR(32) USING RTRIM("developerId");
+ALTER TABLE "UpdateIdea" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "Notification" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "PushToken" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "UserRanksHistory" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "UserRanksHistory" ALTER COLUMN "changedBy" TYPE VARCHAR(32) USING RTRIM("changedBy");
+ALTER TABLE "ProfileDesign" ALTER COLUMN "createdById" TYPE VARCHAR(32) USING RTRIM("createdById");
+ALTER TABLE "OwnedProfileDesign" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "CoinTransaction" ALTER COLUMN "userId" TYPE VARCHAR(32) USING RTRIM("userId");
+ALTER TABLE "CoinTransaction" ALTER COLUMN "actorId" TYPE VARCHAR(32) USING RTRIM("actorId");
+ALTER TABLE "RewardInvite" ALTER COLUMN "buyerId" TYPE VARCHAR(32) USING RTRIM("buyerId");
+
+ALTER TABLE "Music" ADD CONSTRAINT "Music_uploaderId_fkey" FOREIGN KEY ("uploaderId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "MusicPlay" ADD CONSTRAINT "MusicPlay_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "FriendRequest" ADD CONSTRAINT "FriendRequest_senderId_fkey" FOREIGN KEY ("senderId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "FriendRequest" ADD CONSTRAINT "FriendRequest_receiverId_fkey" FOREIGN KEY ("receiverId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Friendship" ADD CONSTRAINT "Friendship_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Friendship" ADD CONSTRAINT "Friendship_friendId_fkey" FOREIGN KEY ("friendId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Album" ADD CONSTRAINT "Album_creatorId_fkey" FOREIGN KEY ("creatorId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "PlaylistCollaborator" ADD CONSTRAINT "PlaylistCollaborator_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Favorite" ADD CONSTRAINT "Favorite_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "SavedAlbum" ADD CONSTRAINT "SavedAlbum_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "MusicRequest" ADD CONSTRAINT "MusicRequest_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "BugReport" ADD CONSTRAINT "BugReport_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "UpdatePost" ADD CONSTRAINT "UpdatePost_developerId_fkey" FOREIGN KEY ("developerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "UpdateIdea" ADD CONSTRAINT "UpdateIdea_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "PushToken" ADD CONSTRAINT "PushToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "UserRanksHistory" ADD CONSTRAINT "UserRanksHistory_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "UserRanksHistory" ADD CONSTRAINT "UserRanksHistory_changedBy_fkey" FOREIGN KEY ("changedBy") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "ProfileDesign" ADD CONSTRAINT "ProfileDesign_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "OwnedProfileDesign" ADD CONSTRAINT "OwnedProfileDesign_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "CoinTransaction" ADD CONSTRAINT "CoinTransaction_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "CoinTransaction" ADD CONSTRAINT "CoinTransaction_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "RewardInvite" ADD CONSTRAINT "RewardInvite_buyerId_fkey" FOREIGN KEY ("buyerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

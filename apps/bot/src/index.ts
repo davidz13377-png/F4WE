@@ -18,14 +18,14 @@ const commands = [
     .addStringOption(o => o.setName("key").setDescription("3-64 letters, numbers, _ or -").setMinLength(3).setMaxLength(64).setRequired(true))
     .addIntegerOption(o => o.setName("uses").setDescription("How many accounts may register (1-100)").setMinValue(1).setMaxValue(100).setRequired(true)),
   new SlashCommandBuilder().setName("rangadd").setDescription("Change a F4WE user's rank")
-    .addStringOption(o => o.setName("user_id").setDescription("16-digit app user ID").setRequired(true))
+    .addStringOption(o => o.setName("user_id").setDescription("4-32 digit app user ID").setRequired(true))
     .addStringOption(o => o.setName("rank").setDescription("New rank").setRequired(true).addChoices(
       { name: "Access", value: "Access" }, { name: "Moderator", value: "Moderator" }, { name: "Admin", value: "Admin" }, { name: "Developer", value: "Developer" }
     )),
   new SlashCommandBuilder().setName("addowner").setDescription("Grant protected Owner alongside the existing app rank")
-    .addStringOption(o => o.setName("user_id").setDescription("16-digit app user ID").setRequired(true)),
+    .addStringOption(o => o.setName("user_id").setDescription("4-32 digit app user ID").setRequired(true)),
   new SlashCommandBuilder().setName("removeowner").setDescription("Remove protected Owner from an app account")
-    .addStringOption(o => o.setName("user_id").setDescription("16-digit app user ID").setRequired(true)),
+    .addStringOption(o => o.setName("user_id").setDescription("4-32 digit app user ID").setRequired(true)),
   new SlashCommandBuilder().setName("addmusic").setDescription("MP3 feltöltése közvetlenül az F4WE-be")
     .addStringOption(o => o.setName("zene_neve").setDescription("A zene címe").setMinLength(1).setMaxLength(150).setRequired(true))
     .addStringOption(o => o.setName("eloado").setDescription("Előadó").setMaxLength(150).setRequired(true))
@@ -36,7 +36,7 @@ const commands = [
     .addStringOption(o => o.setName("rank").setDescription("Optional rank filter").addChoices(
       { name: "Access", value: "Access" }, { name: "Moderator", value: "Moderator" }, { name: "Admin", value: "Admin" }, { name: "Developer", value: "Developer" }
     ))
-    .addStringOption(o => o.setName("search").setDescription("Username or 16-digit ID"))
+    .addStringOption(o => o.setName("search").setDescription("Username or app ID"))
     .addStringOption(o => o.setName("sort").setDescription("Sort direction").addChoices({ name: "Newest", value: "desc" }, { name: "Oldest", value: "asc" })),
   new SlashCommandBuilder().setName("keylist").setDescription("Show access-key totals"),
   new SlashCommandBuilder().setName("validkey").setDescription("List currently unused access keys"),

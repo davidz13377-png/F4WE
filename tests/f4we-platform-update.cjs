@@ -38,6 +38,9 @@ const music = read("apps/api/src/routes/music.ts");
 for (const contract of ['router.get("/:id/info"', 'router.post("/:id/cut"', "pg_advisory_xact_lock", "releaseDateInput"]) {
   assert.ok(music.includes(contract), `Missing music contract: ${contract}`);
 }
+const storage = read("apps/api/src/services/storage.ts"), cutSelector = read("apps/mobile/src/components/CutRangeSelector.tsx"), manager = read("apps/mobile/app/profile/music-manager.tsx");
+assert.ok(storage.includes('spawn("ffprobe"') && storage.includes('"-t", String(requestedDuration)') && !storage.includes('"-to", String(endSeconds)'), "Audio cutting must use accurate duration-based FFmpeg output and FFprobe validation");
+assert.ok(cutSelector.includes("PanResponder") && cutSelector.includes("Play selected range") && manager.includes("<CutRangeSelector"), "The mobile two-handle cut preview is incomplete");
 const lyrics = read("apps/mobile/src/components/MiniPlayer.tsx");
 assert.ok(lyrics.includes("onPress={() => void player.seek(line.time)}"), "Timed lyric lines do not seek playback");
 
@@ -57,6 +60,9 @@ assert.ok(notificationService.includes("https://exp.host/--/api/v2/push/send") &
 const developer = read("apps/api/src/routes/developer.ts"), friends = read("apps/api/src/routes/friends.ts"), owner = read("apps/mobile/app/profile/owner.tsx");
 assert.ok(developer.includes('/users/:id/app-id') && developer.includes('/staff-stats'), "Owner ID editing or staff stats are missing");
 assert.ok(friends.includes('/charts') && owner.includes("Publish required update") && owner.includes("Maintenance break"), "Friend charts or Owner controls are missing");
+const flexibleIdMigration = read("apps/api/prisma/migrations/20261005000000_flexible_user_ids/migration.sql");
+assert.ok(schema.includes("@db.VarChar(32)") && !schema.includes("@db.Char(16)"), "User IDs are still fixed to 16 characters");
+assert.ok(flexibleIdMigration.includes('ALTER TABLE "User" ALTER COLUMN "id" TYPE VARCHAR(32)') && developer.includes("/^\\d{4,32}$/"), "Flexible 4-32 digit App IDs are incomplete");
 
 const appJson = JSON.parse(read("apps/mobile/app.json"));
 assert.equal(appJson.expo.version, "1.1.0");

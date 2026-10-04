@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Redirect, useFocusEffect } from "expo-router";
 import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -15,25 +15,39 @@ import { F4WEAlert as Alert } from "../../src/components/F4WEAlert";
 import { profilePictureUrl } from "../../src/lib/media";
 import { colors } from "../../src/lib/theme";
 import type { Song } from "../../src/types";
+import { CutRangeSelector, formatCutTime } from "../../src/components/CutRangeSelector";
 
 export default function MusicManager() {
   const { user, loading } = useAuth(), library = useLibrary(), player = usePlayer();
   const insets = useSafeAreaInsets();
   const [editing, setEditing] = useState<Song | null>(null), [title, setTitle] = useState(""), [artist, setArtist] = useState("");
-  const [releaseDate, setReleaseDate] = useState(""), [cutStart, setCutStart] = useState("0"), [cutEnd, setCutEnd] = useState(""), [songInfo, setSongInfo] = useState<{ playCount: number; uploadDate: string; releaseDate?: string | null; duration?: number | null } | null>(null);
+  const [releaseDate, setReleaseDate] = useState(""), [cutStart, setCutStart] = useState(0), [cutEnd, setCutEnd] = useState(0), [cutDuration, setCutDuration] = useState(0), [cutPreviewId, setCutPreviewId] = useState<string | null>(null), [songInfo, setSongInfo] = useState<{ playCount: number; uploadDate: string; releaseDate?: string | null; duration?: number | null } | null>(null);
   const [lyricsFile, setLyricsFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null), [lyricsType, setLyricsType] = useState<"timed" | "plain">("timed");
   const [songs, setSongs] = useState<Song[]>([]), [total, setTotal] = useState(0), [query, setQuery] = useState(""), [busy, setBusy] = useState<string | null>(null), [error, setError] = useState("");
   const canDelete = !!user?.isOwner || user?.rank === "Admin" || user?.rank === "Developer";
   const allowed = !!user?.isOwner || user?.rank === "Moderator" || canDelete;
+  const previewStopPending = useRef(false);
   const load = useCallback(async () => {
     if (!allowed) return;
     try { const [items, count] = await Promise.all([api<Song[]>("/api/music?q=" + encodeURIComponent(query.trim())), api<{ count: number }>("/api/music/count")]); setSongs(items); setTotal(count.count); setError(""); }
     catch (e) { setError(e instanceof Error ? e.message : "Could not load music"); }
   }, [allowed, query]);
   useFocusEffect(useCallback(() => { const timer = setTimeout(() => void load(), 300); return () => clearTimeout(timer); }, [load]));
+  useEffect(() => {
+    if (!editing || cutPreviewId !== editing.id || String(player.active?.id || "") !== editing.id || !player.playing || cutEnd <= cutStart || player.position < cutEnd - .08) {
+      previewStopPending.current = false; return;
+    }
+    if (previewStopPending.current) return;
+    previewStopPending.current = true;
+    void player.toggle().then(() => player.seek(cutStart)).finally(() => { previewStopPending.current = false; });
+  }, [editing?.id, cutPreviewId, player.active?.id, player.playing, player.position, cutStart, cutEnd]);
+  useEffect(() => {
+    if (!editing || String(player.active?.id || "") !== editing.id || player.duration <= 0 || cutDuration > 0) return;
+    setCutDuration(player.duration); setCutEnd(player.duration);
+  }, [editing?.id, player.active?.id, player.duration, cutDuration]);
   if (loading) return <Screen><ActivityIndicator color={colors.accent} /></Screen>;
   if (!allowed) return <Redirect href="/(tabs)/profile" />;
-  const edit = (song: Song) => { if (busy) return; setEditing(song); setTitle(song.title); setArtist(song.artist || ""); setReleaseDate(song.releaseDate?.slice(0, 10) || ""); setLyricsFile(null); setLyricsType(song.lyricsSynced ? "timed" : "plain"); setCutStart("0"); setCutEnd(String(song.duration || "")); setSongInfo(null); void api<{ playCount: number; uploadDate: string; releaseDate?: string | null; duration?: number | null }>(`/api/music/${encodeURIComponent(song.id)}/info`).then(value => { setSongInfo(value); setReleaseDate(value.releaseDate?.slice(0, 10) || ""); if (!song.duration && value.duration) setCutEnd(String(value.duration)); }).catch(() => undefined); };
+  const edit = (song: Song) => { if (busy) return; const duration = song.duration || 0; setEditing(song); setTitle(song.title); setArtist(song.artist || ""); setReleaseDate(song.releaseDate?.slice(0, 10) || ""); setLyricsFile(null); setLyricsType(song.lyricsSynced ? "timed" : "plain"); setCutStart(0); setCutEnd(duration); setCutDuration(duration); setCutPreviewId(null); setSongInfo(null); void api<{ playCount: number; uploadDate: string; releaseDate?: string | null; duration?: number | null }>(`/api/music/${encodeURIComponent(song.id)}/info`).then(value => { setSongInfo(value); setReleaseDate(value.releaseDate?.slice(0, 10) || ""); if (value.duration && value.duration > 0) { setCutDuration(value.duration); setCutEnd(value.duration); } }).catch(() => undefined); };
   const save = async () => {
     if (!editing || busy) return;
     if (!title.trim()) return Alert.alert("Title required", "Enter a song title.");
@@ -41,7 +55,8 @@ export default function MusicManager() {
     try {
       const updated = await api<Song>("/api/music/" + encodeURIComponent(editing.id), { method: "PATCH", body: JSON.stringify({ title: title.trim(), artist: artist.trim() || null, releaseDate: releaseDate.trim() || null }) });
       setSongs(items => items.map(item => item.id === updated.id ? updated : item));
-      setEditing(null); await player.updateSongMetadata(updated); await library.refresh(); await load();
+      if (cutPreviewId === editing.id && String(player.active?.id || "") === editing.id && player.playing) await player.toggle();
+      setCutPreviewId(null); setEditing(null); await player.updateSongMetadata(updated); await library.refresh(); await load();
     } catch (e) { Alert.alert("Could not save song", e instanceof Error ? e.message : "Try again"); }
     finally { setBusy(null); }
   };
@@ -105,11 +120,24 @@ export default function MusicManager() {
       }).catch(e => Alert.alert("Could not remove lyrics", e.message)).finally(() => setBusy(null));
     } }]);
   };
+  const toggleCutPreview = async () => {
+    if (!editing || busy || cutDuration <= 0) return Alert.alert("Duration unavailable", "Wait until the song duration loads, then try again.");
+    try {
+      const samePreview = cutPreviewId === editing.id && String(player.active?.id || "") === editing.id;
+      if (samePreview && player.playing) await player.toggle();
+      else if (samePreview) { await player.seek(cutStart); await player.toggle(); }
+      else { setCutPreviewId(editing.id); await player.play(editing, [editing], { preview: true }); await player.seek(cutStart); }
+    } catch (e) { Alert.alert("Preview failed", e instanceof Error ? e.message : "Could not play this range"); }
+  };
+  const closeEditor = () => {
+    if (editing && cutPreviewId === editing.id && String(player.active?.id || "") === editing.id && player.playing) void player.toggle();
+    setCutPreviewId(null); setEditing(null);
+  };
   const cutSong = () => {
     if (!editing || busy) return;
-    const startSeconds = Number(cutStart), endSeconds = Number(cutEnd);
-    if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds - startSeconds < 1) return Alert.alert("Invalid cut range", "Enter a valid start and end in seconds, keeping at least one second.");
-    Alert.alert("Cut this MP3?", `Keep audio from ${startSeconds}s to ${endSeconds}s. The original stored file will be replaced.`, [{ text: "Cancel" }, { text: "Cut and save", style: "destructive", onPress: () => { setBusy(editing.id); void api<Song>(`/api/music/${encodeURIComponent(editing.id)}/cut`, { method: "POST", body: JSON.stringify({ startSeconds, endSeconds }) }).then(async updated => { setEditing(updated); setSongs(items => items.map(item => item.id === updated.id ? updated : item)); await player.updateSongMetadata(updated); await library.refresh(); Alert.alert("Music cut saved", `New duration: ${updated.duration ?? "unknown"} seconds.`); }).catch(e => Alert.alert("Could not cut music", e.message)).finally(() => setBusy(null)); } }]);
+    const startSeconds = cutStart, endSeconds = cutEnd;
+    if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || cutDuration <= 0 || startSeconds < 0 || endSeconds > cutDuration + .1 || endSeconds - startSeconds < 1) return Alert.alert("Invalid cut range", "Select a valid start and end, keeping at least one second.");
+    Alert.alert("Cut this MP3?", `Keep ${formatCutTime(startSeconds)} – ${formatCutTime(endSeconds)}. The original stored file will be replaced.`, [{ text: "Cancel" }, { text: "Cut and save", style: "destructive", onPress: () => { if (cutPreviewId === editing.id && player.playing) void player.toggle(); setCutPreviewId(null); setBusy(editing.id); void api<Song>(`/api/music/${encodeURIComponent(editing.id)}/cut`, { method: "POST", body: JSON.stringify({ startSeconds, endSeconds }) }).then(async updated => { const duration = updated.duration || Math.max(1, Math.round(endSeconds - startSeconds)); setEditing(updated); setCutStart(0); setCutEnd(duration); setCutDuration(duration); setSongs(items => items.map(item => item.id === updated.id ? updated : item)); await player.updateSongMetadata(updated); await library.refresh(); Alert.alert("Music cut saved", `New duration: ${formatCutTime(duration)}.`); }).catch(e => Alert.alert("Could not cut music", e.message)).finally(() => setBusy(null)); } }]);
   };
   return <Screen><View style={[ui.row, { alignItems: "flex-start", gap: 12 }]}><View style={{ flex: 1 }}><Title subtitle="Moderator / Admin / Developer: edit song details and artwork.">Music Manager</Title></View><View style={{ backgroundColor: colors.raised, borderRadius: 99, paddingHorizontal: 13, paddingVertical: 8 }}><Text style={{ color: colors.softRed, fontWeight: "900" }}>{total} songs</Text></View></View><Input placeholder="Search songs or artists" maxLength={100} value={query} onChangeText={setQuery} />
     {error ? <Text style={{ color: colors.red }}>{error}</Text> : null}
@@ -118,7 +146,7 @@ export default function MusicManager() {
       <Pressable accessibilityRole="button" accessibilityLabel={"Edit " + song.title} disabled={!!busy} onPress={() => edit(song)} style={{ padding: 10, alignItems: "center" }}><Ionicons name="create-outline" size={23} color={colors.accent} /><Text style={{ color: colors.accent, fontSize: 12, marginTop: 4 }}>Edit</Text></Pressable>
       {canDelete ? <Pressable accessibilityRole="button" accessibilityLabel={"Delete " + song.title} disabled={!!busy} onPress={() => remove(song)} style={{ padding: 12 }}>{busy === song.id ? <ActivityIndicator color={colors.red} /> : <Ionicons name="trash-outline" size={25} color={colors.red} />}</Pressable> : null}
     </View>)}{!songs.length && !error ? <Empty label="No matching songs" /> : null}
-    <Modal visible={!!editing && allowed} transparent animationType="slide" onRequestClose={() => { if (!busy) setEditing(null); }}>
+    <Modal visible={!!editing && allowed} transparent animationType="slide" onRequestClose={() => { if (!busy) closeEditor(); }}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1, justifyContent: "flex-end", backgroundColor: "#000A" }}>
         <View style={{ backgroundColor: colors.surface, padding: 22, paddingBottom: insets.bottom + 22, borderTopLeftRadius: 24, borderTopRightRadius: 24 }}>
           <ScrollView keyboardShouldPersistTaps="handled"><Text style={[ui.section, { marginTop: 0 }]}>Edit song</Text>
@@ -129,14 +157,16 @@ export default function MusicManager() {
             <Text style={ui.label}>Artist</Text><Input accessibilityLabel="Artist" value={artist} maxLength={150} onChangeText={setArtist} editable={!busy} placeholder="Artist (optional)" />
             <Text style={ui.label}>Release date (optional)</Text><Input accessibilityLabel="Release date" value={releaseDate} maxLength={10} onChangeText={setReleaseDate} editable={!busy} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
             {songInfo ? <Card><Text style={[ui.body, { fontWeight: "900" }]}>{songInfo.playCount} total plays</Text><Text style={ui.muted}>{songInfo.releaseDate ? "Released" : "Added"} {new Date(songInfo.releaseDate || songInfo.uploadDate).toLocaleDateString("en-GB", { year: "numeric", month: "long", day: "numeric" })}</Text></Card> : null}
-            <Text style={[ui.label, { marginTop: 6 }]}>Cut Music</Text><Text style={[ui.muted, { marginBottom: 8 }]}>Remove unwanted audio from the beginning or end. Enter seconds.</Text><View style={{ flexDirection: "row", gap: 8 }}><View style={{ flex: 1 }}><Input value={cutStart} onChangeText={setCutStart} keyboardType="decimal-pad" placeholder="Start seconds" /></View><View style={{ flex: 1 }}><Input value={cutEnd} onChangeText={setCutEnd} keyboardType="decimal-pad" placeholder="End seconds" /></View></View><Button title="Cut and replace music" icon="cut-outline" tone="dark" loading={!!busy} onPress={cutSong} />
+            <Text style={[ui.label, { marginTop: 6 }]}>Cut Music</Text><Text style={[ui.muted, { marginBottom: 8 }]}>Drag both handles, then preview exactly what will remain. The times below update to tenths of a second.</Text>
+            <CutRangeSelector duration={cutDuration} start={cutStart} end={cutEnd} position={cutPreviewId === editing?.id ? player.position : 0} previewing={cutPreviewId === editing?.id && String(player.active?.id || "") === editing?.id && player.playing} disabled={!!busy} onChangeStart={setCutStart} onChangeEnd={setCutEnd} onTogglePreview={() => void toggleCutPreview()} />
+            <Button title="Cut and replace music" icon="cut-outline" tone="dark" loading={!!busy} disabled={cutDuration <= 0} onPress={cutSong} />
             <Text style={[ui.label, { marginTop: 6 }]}>Lyrics {editing?.hasLyrics ? "• added" : "• not added yet"}</Text>
             <View style={{ flexDirection: "row", backgroundColor: colors.raised, borderRadius: 14, padding: 4, marginBottom: 10 }}><LyricsMode label="Timed .lrc" selected={lyricsType === "timed"} onPress={() => { setLyricsType("timed"); setLyricsFile(null); }} /><LyricsMode label="Plain .txt" selected={lyricsType === "plain"} onPress={() => { setLyricsType("plain"); setLyricsFile(null); }} /></View>
             <Button title={lyricsFile?.name || `Choose ${lyricsType === "timed" ? ".lrc" : ".txt"} file`} icon="document-text-outline" tone="dark" loading={!!busy} onPress={() => void chooseLyrics()} />
             {lyricsFile ? <View style={{ marginTop: 8 }}><Button title="Save lyrics" icon="checkmark" loading={!!busy} onPress={() => void saveLyrics()} /></View> : null}
             {editing?.hasLyrics ? <View style={{ marginTop: 8, marginBottom: 12 }}><Button title="Remove lyrics" tone="dark" loading={!!busy} onPress={removeLyrics} /></View> : <View style={{ height: 12 }} />}
             <Button title="Save changes" loading={!!busy} onPress={() => void save()} /><View style={{ height: 10 }} />
-            <Button title="Cancel" tone="dark" loading={!!busy} onPress={() => setEditing(null)} />
+            <Button title="Cancel" tone="dark" loading={!!busy} onPress={closeEditor} />
           </ScrollView>
         </View>
       </KeyboardAvoidingView>

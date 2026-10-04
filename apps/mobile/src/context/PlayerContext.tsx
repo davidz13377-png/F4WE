@@ -51,7 +51,7 @@ async function updateNotification(track?: Track) {
   });
 }
 
-type PlayOptions = { queueControls?: boolean; following?: boolean };
+type PlayOptions = { queueControls?: boolean; following?: boolean; preview?: boolean };
 type PlayerValue = {
   active?: Track; playing: boolean; loading: boolean; error: string | null;
   position: number; duration: number; buffered: number; volume: number;
@@ -68,6 +68,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const { recordPlayed } = useLibrary();
   const { user, loading: authLoading, socket } = useAuth();
   const lastRecorded = useRef<string | null>(null), previousUser = useRef<string | undefined>(undefined);
+  const previewMode = useRef(false);
   const active = useActiveTrack();
   const activeRef = useRef<Track | undefined>(active);
   const playback = usePlaybackState();
@@ -90,13 +91,13 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     if (authLoading) return;
     if (!user || (previousUser.current && previousUser.current !== user.id)) {
       void TrackPlayer.reset().catch(() => undefined);
-      lastRecorded.current = null; setPlaySession(null); setEditedMetadata({}); setFollowingUserId(null);
+      previewMode.current = false; lastRecorded.current = null; setPlaySession(null); setEditedMetadata({}); setFollowingUserId(null);
     }
     previousUser.current = user?.id;
   }, [user?.id, authLoading]);
 
   useEffect(() => {
-    if (!user || playback.state !== State.Playing || typeof active?.id !== "string") return;
+    if (!user || previewMode.current || playback.state !== State.Playing || typeof active?.id !== "string") return;
     const musicId = String(active.id), key = user.id + ":" + musicId;
     if (lastRecorded.current === key) return;
     lastRecorded.current = key; setPlaySession(null);
@@ -126,7 +127,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   }, [active?.id, active?.duration, progress.duration]);
 
   useEffect(() => {
-    if (!socket || !active || typeof active.id !== "string") return;
+    if (!socket || previewMode.current || !active || typeof active.id !== "string") return;
     const now = Date.now(); if (now - lastPresenceSent.current < 1_800) return;
     lastPresenceSent.current = now;
     socket.emit("listening:update", {
@@ -168,7 +169,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const play = async (song: Song, queue: Song[] = [song], options: PlayOptions = {}) => {
     if (changingTrack.current) return;
     if (!options.following) leaveFollowing();
-    changingTrack.current = true; setStarting(true);
+    changingTrack.current = true; previewMode.current = !!options.preview; setStarting(true);
     try {
       await run(async () => {
         const token = currentToken(); if (!token) throw new Error("Please sign in again before playing music.");
