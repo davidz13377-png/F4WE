@@ -10,19 +10,26 @@ import { asyncRoute } from "../middleware/errors.js";
 import { audit } from "../services/logging.js";
 import { notifyUser } from "../services/realtime.js";
 import { songView } from "../services/catalog.js";
-import { beginDirectUpload, completeDirectUpload, deleteImage, deleteMusic, mp3DurationSeconds, openMusic, saveImage, saveMusic, storedMusicName } from "../services/storage.js";
+import { beginDirectUpload, completeDirectUpload, cutMusic, deleteImage, deleteMusic, mp3DurationSeconds, openMusic, saveImage, saveMusic, storedMusicName } from "../services/storage.js";
 import { addSongToStaffPlaylist } from "../services/staffPlaylist.js";
+import { musicIdentity } from "../services/musicIdentity.js";
+import { createUserNotification } from "../services/notifications.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_MP3_MB * 1024 * 1024, files: 1 } });
 const artworkUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
 const directUploadRequest = z.object({ mimeType: z.string().min(1).max(100), size: z.number().int().positive().optional() }).strict();
 const directUploadCompletion = z.object({ uploadToken: z.string().min(1).max(5000) }).strict();
+const releaseDateInput = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Release date must use YYYY-MM-DD").refine(value => {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}, "Release date is not valid");
+const releaseDateValue = (value: string | null | undefined) => value ? new Date(`${value}T00:00:00.000Z`) : value === null ? null : undefined;
 
 router.use(authenticate);
 
-const normalizedDuplicate = async (title: string, artist?: string | null) => prisma.music.findFirst({
-  where: { title: { equals: title.trim(), mode: "insensitive" }, artist: artist?.trim() ? { equals: artist.trim(), mode: "insensitive" } : null },
+const normalizedDuplicate = async (title: string, artist?: string | null, excludeId?: string) => prisma.music.findFirst({
+  where: { ...musicIdentity(title, artist), ...(excludeId ? { id: { not: excludeId } } : {}) },
   select: { id: true, title: true, artist: true, artworkUrl: true }
 });
 
@@ -73,15 +80,24 @@ router.get("/rotation", asyncRoute(async (req, res) => {
   }));
 }));
 
+router.get("/:id/info", asyncRoute(async (req, res) => {
+  const song = await prisma.music.findUnique({ where: { id: req.params.id as string }, select: { id: true, title: true, artist: true, uploadDate: true, releaseDate: true, duration: true, _count: { select: { plays: true } } } });
+  if (!song) return res.status(404).json({ error: "Song not found" });
+  res.json({ id: song.id, title: song.title, artist: song.artist, uploadDate: song.uploadDate, releaseDate: song.releaseDate, duration: song.duration, playCount: song._count.plays });
+}));
+
 router.patch("/:id", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
   const input = z.object({
     title: z.string().trim().min(1).max(150),
-    artist: z.string().trim().max(150).nullable()
+    artist: z.string().trim().max(150).nullable(),
+    releaseDate: releaseDateInput.nullable().optional()
   }).strict().parse(req.body);
   const song = await prisma.music.findUnique({ where: { id: req.params.id as string } });
   if (!song) return res.status(404).json({ error: "Song not found" });
+  const duplicate = await normalizedDuplicate(input.title, input.artist, song.id);
+  if (duplicate) return res.status(409).json({ error: "A song with this title and artist already exists", duplicate });
   const updated = await prisma.$transaction(async tx => {
-    const result = await tx.music.update({ where: { id: song.id }, data: { title: input.title, artist: input.artist || null },
+    const result = await tx.music.update({ where: { id: song.id }, data: { title: input.title, artist: input.artist || null, ...musicIdentity(input.title, input.artist), ...(input.releaseDate !== undefined ? { releaseDate: releaseDateValue(input.releaseDate) } : {}) },
       include: { favorites: { where: { userId: req.auth!.userId }, select: { userId: true } } } });
     await tx.logEvent.create({ data: { type: "MUSIC_UPLOAD", userId: req.auth!.userId, actionType: "music.edited",
       details: { musicId: song.id, oldTitle: song.title, oldArtist: song.artist ?? null, title: result.title, artist: result.artist } } });
@@ -165,11 +181,34 @@ router.delete("/:id", requireRank(Rank.Admin, Rank.Developer), asyncRoute(async 
   const song = await prisma.music.findUnique({ where: { id: req.params.id as string } });
   if (!song) return res.status(404).json({ error: "Song not found" });
   await prisma.$transaction(async tx => {
+    const memberships = await tx.albumSong.findMany({ where: { musicId: song.id }, select: { albumId: true } });
+    await Promise.all(memberships.map(item => tx.album.update({ where: { id: item.albumId }, data: { cachedTrackCount: { decrement: 1 }, cachedDuration: { decrement: song.duration ?? 0 } } })));
     await tx.music.delete({ where: { id: song.id } });
     await tx.logEvent.create({ data: { type: "MUSIC_UPLOAD", userId: req.auth!.userId, actionType: "music.deleted", details: { musicId: song.id, title: song.title, fileRetained: true, retainedFile: storedMusicName(song.filePath) } } });
   });
   // Keep the original MP3 on disk for recovery; DB cascades remove playlist/favorite links.
   res.status(204).end();
+}));
+
+router.post("/:id/cut", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
+  const { startSeconds, endSeconds } = z.object({ startSeconds: z.number().min(0).max(86_400), endSeconds: z.number().positive().max(86_400) }).strict().refine(value => value.endSeconds - value.startSeconds >= 1, { message: "Keep at least one second of audio" }).parse(req.body);
+  const song = await prisma.music.findUnique({ where: { id: req.params.id as string } });
+  if (!song) return res.status(404).json({ error: "Song not found" });
+  if (song.duration && endSeconds > song.duration + 1) return res.status(400).json({ error: "Cut end is after the song duration" });
+  const cut = await cutMusic(song.filePath, startSeconds, endSeconds);
+  try {
+    const updated = await prisma.$transaction(async tx => {
+      const durationDelta = cut.duration - (song.duration ?? 0);
+      if (durationDelta) {
+        const memberships = await tx.albumSong.findMany({ where: { musicId: song.id }, select: { albumId: true } });
+        await Promise.all(memberships.map(item => tx.album.update({ where: { id: item.albumId }, data: { cachedDuration: { increment: durationDelta } } })));
+      }
+      return tx.music.update({ where: { id: song.id }, data: { filePath: cut.reference, duration: cut.duration } });
+    });
+    await deleteMusic(song.filePath).catch(() => undefined);
+    await audit("MUSIC_UPLOAD", req.auth!.userId, "music.cut", { musicId: song.id, startSeconds, endSeconds, duration: cut.duration });
+    res.json(songView(updated));
+  } catch (error) { await deleteMusic(cut.reference).catch(() => undefined); throw error; }
 }));
 
 router.post("/upload/upload-url", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
@@ -183,6 +222,7 @@ router.post("/upload/complete", requireRank(Rank.Moderator, Rank.Admin, Rank.Dev
     title: z.string().trim().min(1).max(150),
     artist: z.string().trim().max(150).optional(),
     artworkUrl: z.string().url().optional(),
+    releaseDate: releaseDateInput.optional(),
     confirmDuplicate: z.boolean().default(false)
   }).strict().parse(req.body ?? {});
   const uploaded = await completeDirectUpload("music", req.auth!.userId, input.uploadToken);
@@ -194,7 +234,12 @@ router.post("/upload/complete", requireRank(Rank.Moderator, Rank.Admin, Rank.Dev
   let song;
   try {
     song = await prisma.$transaction(async tx => {
-      const created = await tx.music.create({ data: { title: input.title, artist: input.artist, artworkUrl: input.artworkUrl, filePath: uploaded.reference, mimeType: uploaded.mimeType, duration: uploaded.duration, uploaderId: req.auth!.userId } });
+      const identity = musicIdentity(input.title, input.artist);
+      if (!input.confirmDuplicate) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${identity.normalizedTitle + "\u0000" + identity.normalizedArtist}))`;
+        if (await tx.music.findFirst({ where: identity, select: { id: true } })) throw Object.assign(new Error("A song with this title and artist already exists"), { status: 409 });
+      }
+      const created = await tx.music.create({ data: { title: input.title, artist: input.artist, ...identity, artworkUrl: input.artworkUrl, releaseDate: releaseDateValue(input.releaseDate), filePath: uploaded.reference, mimeType: uploaded.mimeType, duration: uploaded.duration, uploaderId: req.auth!.userId } });
       await addSongToStaffPlaylist(created.id, tx);
       return created;
     });
@@ -207,7 +252,7 @@ router.post("/upload/complete", requireRank(Rank.Moderator, Rank.Admin, Rank.Dev
 }));
 
 router.post("/upload", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), upload.single("file"), asyncRoute(async (req, res) => {
-  const meta = z.object({ title: z.string().trim().min(1).max(150), artist: z.string().trim().max(150).optional(), artworkUrl: z.string().url().optional(), confirmDuplicate: z.enum(["true", "false"]).optional().transform(value => value === "true") }).parse(req.body ?? {});
+  const meta = z.object({ title: z.string().trim().min(1).max(150), artist: z.string().trim().max(150).optional(), artworkUrl: z.string().url().optional(), releaseDate: releaseDateInput.optional(), confirmDuplicate: z.enum(["true", "false"]).optional().transform(value => value === "true") }).parse(req.body ?? {});
   const duplicate = await normalizedDuplicate(meta.title, meta.artist);
   if (duplicate && !meta.confirmDuplicate) return res.status(409).json({ error: "A song with this title and artist already exists", duplicate, confirmationRequired: true });
   if (!req.file) return res.status(400).json({ error: "MP3 file is required" });
@@ -217,7 +262,12 @@ router.post("/upload", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), 
   let song;
   try {
     song = await prisma.$transaction(async tx => {
-      const created = await tx.music.create({ data: { title: meta.title, artist: meta.artist, artworkUrl: meta.artworkUrl, filePath, duration: mp3DurationSeconds(req.file!.buffer), uploaderId: req.auth!.userId } });
+      const identity = musicIdentity(meta.title, meta.artist);
+      if (!meta.confirmDuplicate) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${identity.normalizedTitle + "\u0000" + identity.normalizedArtist}))`;
+        if (await tx.music.findFirst({ where: identity, select: { id: true } })) throw Object.assign(new Error("A song with this title and artist already exists"), { status: 409 });
+      }
+      const created = await tx.music.create({ data: { title: meta.title, artist: meta.artist, ...identity, artworkUrl: meta.artworkUrl, releaseDate: releaseDateValue(meta.releaseDate), filePath, duration: mp3DurationSeconds(req.file!.buffer), uploaderId: req.auth!.userId } });
       await addSongToStaffPlaylist(created.id, tx);
       return created;
     });
@@ -289,14 +339,24 @@ router.patch("/:id/play/:playId", asyncRoute(async (req, res) => {
     return { granted, coins: updated.coins };
   });
   if (!reward) return res.status(404).json({ error: "Listening session not found" });
-  if (reward.granted && reward.coins !== null) notifyUser(userId, "coinsChanged", { coins: reward.coins, granted: reward.granted });
+  if (reward.granted && reward.coins !== null) {
+    notifyUser(userId, "coinsChanged", { coins: reward.coins, granted: reward.granted });
+    await createUserNotification(userId, "F4WE COIN earned", `You earned ${reward.granted} F4WE COIN for listening.`, { type: "listening_reward", granted: reward.granted });
+  }
   res.status(204).end();
 }));
 
 router.patch("/:id/duration", asyncRoute(async (req, res) => {
   const { duration } = z.object({ duration: z.number().int().min(1).max(24 * 60 * 60) }).strict().parse(req.body);
-  const result = await prisma.music.updateMany({ where: { id: req.params.id as string, duration: null }, data: { duration } });
-  res.status(result.count ? 204 : 200).end();
+  const musicId = req.params.id as string;
+  const changed = await prisma.$transaction(async tx => {
+    const result = await tx.music.updateMany({ where: { id: musicId, duration: null }, data: { duration } });
+    if (!result.count) return false;
+    const memberships = await tx.albumSong.findMany({ where: { musicId }, select: { albumId: true } });
+    await Promise.all(memberships.map(item => tx.album.update({ where: { id: item.albumId }, data: { cachedDuration: { increment: duration } } })));
+    return true;
+  });
+  res.status(changed ? 204 : 200).end();
 }));
 
 router.delete("/:id/like", asyncRoute(async (req, res) => {

@@ -18,9 +18,12 @@ router.use(authenticate);
 const input = z.object({ name: z.string().trim().min(1).max(100), description: z.string().trim().max(500).optional(), isPublic: z.boolean().default(false) });
 const accessible = (userId: string, seePrivate = false, staffAccess = false) => ({ AND: [
   ...(staffAccess ? [] : [{ isStaffPlaylist: false }]),
-  ...(seePrivate ? [] : [{ OR: [{ isPublic: true }, { creatorId: userId }, ...(staffAccess ? [{ isStaffPlaylist: true }] : [])] }])
+  ...(seePrivate ? [] : [{ OR: [{ isPublic: true }, { creatorId: userId }, { collaborators: { some: { userId } } }, ...(staffAccess ? [{ isStaffPlaylist: true }] : [])] }])
 ] });
 const creator = { select: { id: true, username: true, rank: true } } as const;
+async function editablePlaylist(albumId: string, userId: string) {
+  return prisma.album.findFirst({ where: { id: albumId, isStaffPlaylist: false, OR: [{ creatorId: userId }, { collaborators: { some: { userId } } }] } });
+}
 
 router.get("/", asyncRoute(async (req, res) => {
   const userId = req.auth!.userId;
@@ -29,18 +32,18 @@ router.get("/", asyncRoute(async (req, res) => {
   const q = z.string().trim().max(100).parse(req.query.q ?? "");
   const rows = await prisma.album.findMany({
     where: { AND: [accessible(userId, seePrivate, staffAccess), ...(req.query.mine === "true" ? [{ creatorId: userId, isStaffPlaylist: false }] : []),
-      ...(req.query.library === "true" ? [{ OR: [{ creatorId: userId }, { savedBy: { some: { userId } } }, ...(staffAccess ? [{ isStaffPlaylist: true }] : [])] }] : []),
+      ...(req.query.library === "true" ? [{ OR: [{ creatorId: userId }, { collaborators: { some: { userId } } }, { savedBy: { some: { userId } } }, ...(staffAccess ? [{ isStaffPlaylist: true }] : [])] }] : []),
       ...(q ? [{ name: { contains: q, mode: "insensitive" as const } }] : [])] },
     orderBy: { creationDate: "desc" },
-    include: { creator, songs: { select: { music: { select: { duration: true } } } }, _count: { select: { songs: true } }, savedBy: { where: { userId }, select: { userId: true } } }
+    include: { creator, savedBy: { where: { userId }, select: { userId: true } }, collaborators: { where: { userId }, select: { userId: true } } }
   });
-  res.json(rows.map(({ savedBy, songs, _count, ...playlist }) => ({ ...playlist, trackCount: _count.songs, totalDuration: songs.reduce((sum, item) => sum + (item.music.duration ?? 0), 0), saved: !!savedBy.length })));
+  res.json(rows.map(({ savedBy, collaborators, cachedTrackCount, cachedDuration, ...playlist }) => ({ ...playlist, trackCount: cachedTrackCount, totalDuration: cachedDuration, saved: !!savedBy.length, canEdit: playlist.creatorId === userId || !!collaborators.length })));
 }));
 
 router.post("/", asyncRoute(async (req, res) => {
   const data = input.parse(req.body);
   const playlist = await prisma.album.create({ data: { ...data, creatorId: req.auth!.userId }, include: { creator } });
-  res.status(201).json({ ...playlist, trackCount: 0, saved: false });
+  res.status(201).json({ ...playlist, trackCount: 0, totalDuration: 0, saved: false, canEdit: true });
 }));
 
 router.patch("/:id", asyncRoute(async (req, res) => {
@@ -57,12 +60,12 @@ router.get("/:id", asyncRoute(async (req, res) => {
   const staffAccess = isStaff(req.auth!.rank, req.auth!.isOwner);
   const playlist = await prisma.album.findFirst({
     where: { id: req.params.id as string, ...accessible(userId, seePrivate, staffAccess) },
-    include: { creator, savedBy: { where: { userId }, select: { userId: true } },
+    include: { creator, savedBy: { where: { userId }, select: { userId: true } }, collaborators: { include: { user: { select: { id: true, username: true, rank: true, profilePicture: true } } }, orderBy: { addedAt: "asc" } },
       songs: { orderBy: [{ order: "asc" }, { musicId: "asc" }], include: { music: { include: { favorites: { where: { userId }, select: { userId: true } } } } } } }
   });
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
-  const { savedBy, songs, ...details } = playlist;
-  res.json({ ...details, saved: !!savedBy.length, trackCount: songs.length, totalDuration: songs.reduce((sum, item) => sum + (item.music.duration ?? 0), 0), songs: songs.map(item => songView(item.music)) });
+  const { savedBy, songs, cachedTrackCount, cachedDuration, collaborators, ...details } = playlist;
+  res.json({ ...details, saved: !!savedBy.length, trackCount: cachedTrackCount, totalDuration: cachedDuration, canEdit: playlist.creatorId === userId || collaborators.some(item => item.userId === userId), collaborators: collaborators.map(item => item.user), songs: songs.map(item => songView(item.music)) });
 }));
 
 router.post("/:id/picture/upload-url", asyncRoute(async (req, res) => {
@@ -122,7 +125,7 @@ router.post("/:id/songs", asyncRoute(async (req, res) => {
   const { musicId } = z.object({ musicId: z.string().min(1).max(100) }).parse(req.body);
   const playlist = await prisma.album.findUnique({ where: { id: albumId } });
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
-  if (playlist.creatorId !== req.auth!.userId) return res.status(403).json({ error: "Only the creator can change this playlist" });
+  if (!await editablePlaylist(albumId, req.auth!.userId)) return res.status(403).json({ error: "Only the creator or a collaborator can edit this playlist" });
   if (playlist.isStaffPlaylist) return res.status(403).json({ error: "The Staff Playlist is maintained automatically" });
   if (!await prisma.music.findUnique({ where: { id: musicId }, select: { id: true } })) return res.status(404).json({ error: "Song not found" });
   await prisma.$transaction(async tx => {
@@ -132,7 +135,9 @@ router.post("/:id/songs", asyncRoute(async (req, res) => {
     const count = await tx.albumSong.count({ where: { albumId } });
     if (count >= 500) throw Object.assign(new Error("A playlist can contain at most 500 songs"), { status: 409 });
     const last = await tx.albumSong.findFirst({ where: { albumId }, orderBy: { order: "desc" } });
+    const music = await tx.music.findUniqueOrThrow({ where: { id: musicId }, select: { duration: true } });
     await tx.albumSong.create({ data: { albumId, musicId, order: (last?.order ?? -1) + 1 } });
+    await tx.album.update({ where: { id: albumId }, data: { cachedTrackCount: { increment: 1 }, cachedDuration: { increment: music.duration ?? 0 } } });
   });
   res.status(204).end();
 }));
@@ -141,9 +146,48 @@ router.delete("/:id/songs/:musicId", asyncRoute(async (req, res) => {
   const albumId = req.params.id as string;
   const playlist = await prisma.album.findUnique({ where: { id: albumId } });
   if (!playlist) return res.status(404).json({ error: "Playlist not found" });
-  if (playlist.creatorId !== req.auth!.userId) return res.status(403).json({ error: "Only the creator can change this playlist" });
+  if (!await editablePlaylist(albumId, req.auth!.userId)) return res.status(403).json({ error: "Only the creator or a collaborator can edit this playlist" });
   if (playlist.isStaffPlaylist) return res.status(403).json({ error: "The Staff Playlist is maintained automatically" });
-  await prisma.albumSong.deleteMany({ where: { albumId, musicId: req.params.musicId as string } });
+  const musicId = req.params.musicId as string;
+  await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Album" WHERE id = ${albumId} FOR UPDATE`;
+    const row = await tx.albumSong.findUnique({ where: { albumId_musicId: { albumId, musicId } }, include: { music: { select: { duration: true } } } });
+    if (!row) return;
+    await tx.albumSong.delete({ where: { albumId_musicId: { albumId, musicId } } });
+    await tx.album.update({ where: { id: albumId }, data: { cachedTrackCount: { decrement: 1 }, cachedDuration: { decrement: row.music.duration ?? 0 } } });
+  });
+  res.status(204).end();
+}));
+
+router.put("/:id/order", asyncRoute(async (req, res) => {
+  const albumId = req.params.id as string;
+  const { musicIds } = z.object({ musicIds: z.array(z.string().min(1).max(100)).max(500) }).strict().parse(req.body);
+  if (new Set(musicIds).size !== musicIds.length) return res.status(400).json({ error: "Song order contains duplicates" });
+  if (!await editablePlaylist(albumId, req.auth!.userId)) return res.status(403).json({ error: "Only the creator or a collaborator can edit this playlist" });
+  await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "Album" WHERE id = ${albumId} FOR UPDATE`;
+    const existing = await tx.albumSong.findMany({ where: { albumId }, select: { musicId: true } });
+    if (existing.length !== musicIds.length || existing.some(item => !musicIds.includes(item.musicId))) throw Object.assign(new Error("The order must contain every playlist song exactly once"), { status: 400 });
+    await Promise.all(musicIds.map((musicId, order) => tx.albumSong.update({ where: { albumId_musicId: { albumId, musicId } }, data: { order } })));
+  });
+  res.status(204).end();
+}));
+
+router.post("/:id/collaborators", asyncRoute(async (req, res) => {
+  const albumId = req.params.id as string;
+  const { username } = z.object({ username: z.string().trim().min(1).max(32) }).strict().parse(req.body);
+  const playlist = await prisma.album.findFirst({ where: { id: albumId, creatorId: req.auth!.userId, isStaffPlaylist: false } });
+  if (!playlist) return res.status(404).json({ error: "Playlist not found or not owned by you" });
+  const friend = await prisma.user.findFirst({ where: { username: { equals: username, mode: "insensitive" }, friendedBy: { some: { userId: req.auth!.userId } } }, select: { id: true, username: true, rank: true, profilePicture: true } });
+  if (!friend) return res.status(404).json({ error: "Only an accepted friend can be invited" });
+  await prisma.playlistCollaborator.upsert({ where: { albumId_userId: { albumId, userId: friend.id } }, create: { albumId, userId: friend.id }, update: {} });
+  res.status(201).json(friend);
+}));
+
+router.delete("/:id/collaborators/:userId", asyncRoute(async (req, res) => {
+  const albumId = req.params.id as string;
+  if (!await prisma.album.findFirst({ where: { id: albumId, creatorId: req.auth!.userId, isStaffPlaylist: false }, select: { id: true } })) return res.status(404).json({ error: "Playlist not found or not owned by you" });
+  await prisma.playlistCollaborator.deleteMany({ where: { albumId, userId: req.params.userId as string } });
   res.status(204).end();
 }));
 

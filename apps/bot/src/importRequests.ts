@@ -8,7 +8,7 @@ import { fileTypeFromFile } from "file-type";
 import type { PrismaClient } from "@prisma/client";
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { env } from "./env.js";
-import { addToStaffPlaylist } from "./musicUpload.js";
+import { addToStaffPlaylist, musicIdentity } from "./musicUpload.js";
 
 const maxBytes = 25 * 1024 * 1024;
 const uploadDir = path.resolve(env.API_UPLOAD_DIR);
@@ -212,6 +212,18 @@ async function removePersistedMusic(reference: string) {
   }
 }
 
+async function sendUserPush(prisma: PrismaClient, userId: string, title: string, body: string, data: Record<string, unknown>) {
+  const tokens = await prisma.pushToken.findMany({ where: { userId }, select: { token: true } });
+  if (!tokens.length) return;
+  try {
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
+      method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(tokens.map(({ token }) => ({ to: token, sound: "default", title, body, data })))
+    });
+    if (!response.ok) console.error("Expo push failed", response.status, (await response.text()).slice(0, 500));
+  } catch (error) { console.error("Expo push request failed", error); }
+}
+
 export async function importQueuedRequests(prisma: PrismaClient) {
   if (running) return;
   running = true;
@@ -235,12 +247,13 @@ export async function importQueuedRequests(prisma: PrismaClient) {
         storedReference = await persistImportedMusic(candidate);
         const title = row.requestedTitle.trim(), artist = row.requestedArtist.trim();
         await prisma.$transaction(async tx => {
-          const song = await tx.music.create({ data: { title, artist, filePath: storedReference! } });
+          const song = await tx.music.create({ data: { title, artist, ...musicIdentity(title, artist), filePath: storedReference! } });
           await addToStaffPlaylist(tx, song.id);
           await tx.musicRequest.update({ where: { id: row.id }, data: { status: "Accepted", importedMusicId: song.id, processedDate: new Date() } });
           await tx.notification.create({ data: { userId: row.userId, title: "Music request imported", body: `${title} — ${artist} is now in F4WE.` } });
           await tx.logEvent.create({ data: { type: "MUSIC_UPLOAD", userId: row.userId, actionType: "music_request.imported", details: { requestId: row.id, musicId: song.id, title, artist } } });
         });
+        await sendUserPush(prisma, row.userId, "Music request imported", `${title} — ${artist} is now in F4WE.`, { type: "music_request", requestId: row.id });
         storedReference = undefined;
       } catch (error) {
         console.error("Music request import failed", row.id, error);
@@ -250,6 +263,7 @@ export async function importQueuedRequests(prisma: PrismaClient) {
           prisma.notification.create({ data: { userId: row.userId, title: "Music request failed", body: "The YouTube import failed. Ask staff to review the link." } }),
           prisma.logEvent.create({ data: { type: "DEBUG", userId: row.userId, actionType: "music_request.import_failed", details: { requestId: row.id, error: reason } } })
         ]).catch(e => console.error("Could not record failed import", e));
+        await sendUserPush(prisma, row.userId, "Music request failed", "The YouTube import failed. Ask staff to review the link.", { type: "music_request", requestId: row.id });
       } finally {
         if (storedReference) await removePersistedMusic(storedReference).catch(() => undefined);
         if (tempDir) await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);

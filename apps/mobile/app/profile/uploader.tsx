@@ -15,7 +15,7 @@ export default function Uploader() {
   const { user } = useAuth();
   const [file, setFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null), [artwork, setArtwork] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [lyricsFile, setLyricsFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null), [lyricsType, setLyricsType] = useState<"timed" | "plain">("timed");
-  const [title, setTitle] = useState(""), [artist, setArtist] = useState(""), [busy, setBusy] = useState(false);
+  const [title, setTitle] = useState(""), [artist, setArtist] = useState(""), [releaseDate, setReleaseDate] = useState(""), [busy, setBusy] = useState(false);
   if (!user || (user.rank === "Access" && !user.isOwner)) return <Redirect href="/(tabs)/profile" />;
   const choose = async () => {
     const result = await DocumentPicker.getDocumentAsync({ type: "audio/mpeg", copyToCacheDirectory: true });
@@ -55,7 +55,7 @@ export default function Uploader() {
           return;
         }
       }
-      const song = await uploadFile<Song>("/api/music/upload", { uri: file.uri, name: file.name || "upload.mp3", type: file.mimeType || "audio/mpeg", size: file.size }, { title: title.trim(), ...(artist.trim() ? { artist: artist.trim() } : {}), confirmDuplicate });
+      const song = await uploadFile<Song>("/api/music/upload", { uri: file.uri, name: file.name || "upload.mp3", type: file.mimeType || "audio/mpeg", size: file.size }, { title: title.trim(), ...(artist.trim() ? { artist: artist.trim() } : {}), ...(releaseDate.trim() ? { releaseDate: releaseDate.trim() } : {}), confirmDuplicate });
       const warnings: string[] = [];
       if (artwork) {
         try { await uploadFile(`/api/music/${encodeURIComponent(song.id)}/picture`, { uri: artwork.uri, name: artwork.fileName || "artwork.jpg", type: artwork.mimeType || "image/jpeg", size: artwork.fileSize }); }
@@ -67,7 +67,7 @@ export default function Uploader() {
           await api(`/api/music/${encodeURIComponent(song.id)}/lyrics`, { method: "PUT", body: JSON.stringify({ type: lyricsType, content }) });
         } catch { warnings.push("The song uploaded, but its lyrics could not be saved."); }
       }
-      setFile(null); setArtwork(null); setLyricsFile(null); setTitle(""); setArtist("");
+      setFile(null); setArtwork(null); setLyricsFile(null); setTitle(""); setArtist(""); setReleaseDate("");
       Alert.alert("Uploaded", warnings.length ? warnings.join("\n") : "The song, artwork and lyrics are now in the F4WE library.");
     } catch (e) {
       Alert.alert("Upload failed", e instanceof Error ? e.message : "Try again");
@@ -75,7 +75,7 @@ export default function Uploader() {
       setBusy(false);
     }
   };
-  return <Screen><Title subtitle="Choose an MP3, optional cover image and optional lyrics directly from your phone.">Music Uploader</Title><PressableCard onPress={() => void choose()} fileName={file?.name} /><View style={{ height: 16 }} /><Input placeholder="Song title" value={title} onChangeText={setTitle} /><Input placeholder="Artist (optional)" value={artist} onChangeText={setArtist} />
+  return <Screen><Title subtitle="Choose an MP3, optional cover image and optional lyrics directly from your phone.">Music Uploader</Title><PressableCard onPress={() => void choose()} fileName={file?.name} /><View style={{ height: 16 }} /><Input placeholder="Song title" value={title} onChangeText={setTitle} /><Input placeholder="Artist (optional)" value={artist} onChangeText={setArtist} /><Input placeholder="Release date (optional) • YYYY-MM-DD" value={releaseDate} maxLength={10} keyboardType="numbers-and-punctuation" onChangeText={setReleaseDate} />
     <Text style={ui.label}>Song artwork</Text><Pressable onPress={() => void chooseArtwork()}><Card><View style={{ alignItems: "center", paddingVertical: 10 }}>{artwork ? <Image source={{ uri: artwork.uri }} style={{ width: 130, height: 130, borderRadius: 14 }} /> : <><Text style={{ color: colors.softRed, fontSize: 30 }}>▧</Text><Text style={[ui.body, { fontWeight: "800", marginTop: 7 }]}>Choose image from phone</Text></>}</View></Card></Pressable>
     <Text style={ui.label}>Lyrics (optional)</Text><View style={{ flexDirection: "row", backgroundColor: colors.raised, borderRadius: 14, padding: 4, marginBottom: 10 }}><Mode label="Timed .lrc" selected={lyricsType === "timed"} onPress={() => { setLyricsType("timed"); setLyricsFile(null); }} /><Mode label="Plain .txt" selected={lyricsType === "plain"} onPress={() => { setLyricsType("plain"); setLyricsFile(null); }} /></View>
     <Button title={lyricsFile?.name || `Choose ${lyricsType === "timed" ? ".lrc" : ".txt"} file`} icon="document-text-outline" tone="dark" onPress={() => void chooseLyrics()} /><View style={{ height: 18 }} />

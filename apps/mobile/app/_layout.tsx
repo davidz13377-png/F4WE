@@ -8,6 +8,8 @@ import { PlaylistPicker } from "../src/components/PlaylistPicker";
 import { F4WEAlertHost } from "../src/components/F4WEAlert";
 import { useAuth } from "../src/context/AuthContext";
 import { colors } from "../src/lib/theme";
+import { AppGate } from "../src/components/AppGate";
+import { PushRegistration } from "../src/components/PushRegistration";
 
 export default function RootLayout() {
   return <AuthProvider><LibraryProvider><PlayerProvider><StatusBar style="light" /><Stack screenOptions={{ headerStyle: { backgroundColor: colors.background }, headerTintColor: colors.text, contentStyle: { backgroundColor: colors.background }, headerShadowVisible: false }}>
@@ -29,7 +31,7 @@ export default function RootLayout() {
     <Stack.Screen name="favorites" options={{ title: "Favorites" }} />
     <Stack.Screen name="friends" options={{ title: "Friends" }} />
     <Stack.Screen name="playlist/[id]" options={{ title: "Playlist" }} />
-  </Stack><SessionPlayer /><F4WEAlertHost /></PlayerProvider></LibraryProvider></AuthProvider>;
+  </Stack><SessionPlayer /><PushRegistration /><AppGate /><F4WEAlertHost /></PlayerProvider></LibraryProvider></AuthProvider>;
 }
 
 function SessionPlayer() { const { user } = useAuth(); return user ? <><MiniPlayer /><PlaylistPicker /></> : null; }

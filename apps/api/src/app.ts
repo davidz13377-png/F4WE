@@ -12,9 +12,11 @@ import profileRoutes from "./routes/profile.js";
 import developerRoutes from "./routes/developer.js";
 import friendRoutes from "./routes/friends.js";
 import shopRoutes from "./routes/shop.js";
+import systemRoutes from "./routes/system.js";
 import { env } from "./env.js";
 import { asyncRoute, errorHandler } from "./middleware/errors.js";
 import { openImage, usingR2Storage } from "./services/storage.js";
+import { systemGuard } from "./middleware/systemGuard.js";
 
 export const app = express();
 
@@ -42,6 +44,8 @@ if (usingR2Storage) {
   app.use("/media/music-artwork", express.static(path.resolve(env.UPLOAD_DIR, "music-artwork"), { fallthrough: false, maxAge: "1d", immutable: true }));
 }
 app.use(rateLimit({ windowMs: 60_000, limit: 180, standardHeaders: "draft-8", legacyHeaders: false }));
+app.use("/api/system", systemRoutes);
+app.use("/api", systemGuard);
 app.use("/api/auth", rateLimit({ windowMs: 15 * 60_000, limit: 25 }), authRoutes);
 app.use("/api/music", musicRoutes);
 app.use("/api/albums", albumRoutes);

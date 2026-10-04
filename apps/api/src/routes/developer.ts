@@ -21,6 +21,33 @@ router.get("/users", asyncRoute(async (req, res) => {
   res.json(users.map(({ activeProfileDesign, ...user }) => ({ ...user, profileDesignUrl: activeProfileDesign?.assetUrl ?? null })));
 }));
 
+router.get("/staff-stats", asyncRoute(async (req, res) => {
+  if (!req.auth!.isOwner) return res.status(403).json({ error: "Owner access required" });
+  const users = await prisma.user.findMany({
+    where: { OR: [{ isOwner: true }, { rank: { in: [Rank.Moderator, Rank.Admin, Rank.Developer] } }] },
+    select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, _count: { select: { uploadedMusic: true } } },
+    orderBy: [{ isOwner: "desc" }, { username: "asc" }]
+  });
+  res.json(users.map(({ _count, ...user }) => ({ ...user, uploadedCount: _count.uploadedMusic })));
+}));
+
+router.patch("/users/:id/app-id", asyncRoute(async (req, res) => {
+  if (!req.auth!.isOwner) return res.status(403).json({ error: "Owner access required" });
+  const oldId = req.params.id as string;
+  const { newId } = z.object({ newId: z.string().regex(/^\d{16}$/, "App ID must contain exactly 16 digits") }).strict().parse(req.body);
+  if (oldId === newId) return res.status(400).json({ error: "The new App ID is unchanged" });
+  const [current, duplicate] = await Promise.all([
+    prisma.user.findUnique({ where: { id: oldId }, select: { id: true, username: true } }),
+    prisma.user.findUnique({ where: { id: newId }, select: { id: true } })
+  ]);
+  if (!current) return res.status(404).json({ error: "User not found" });
+  if (duplicate) return res.status(409).json({ error: "That App ID is already in use" });
+  await prisma.user.update({ where: { id: oldId }, data: { id: newId } });
+  await audit("DEBUG", newId, "user.app_id_changed", { oldId, newId, username: current.username, changedBy: req.auth!.userId });
+  notifyUser(oldId, "sessionInvalidated", { reason: "app_id_changed" });
+  res.json({ oldId, newId, username: current.username, changedCurrentAccount: oldId === req.auth!.userId });
+}));
+
 router.patch("/users/:id/rank", asyncRoute(async (req, res) => {
   const { rank } = z.object({ rank: z.nativeEnum(Rank) }).parse(req.body);
   const user = await prisma.user.findUnique({ where: { id: req.params.id as string } });

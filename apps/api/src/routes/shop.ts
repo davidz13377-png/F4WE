@@ -6,6 +6,7 @@ import { authenticate } from "../middleware/auth.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { audit } from "../services/logging.js";
 import { notifyUser } from "../services/realtime.js";
+import { createUserNotification } from "../services/notifications.js";
 import { beginDirectUpload, completeDirectUpload, deleteImage } from "../services/storage.js";
 
 const router = Router();
@@ -42,8 +43,8 @@ router.get("/", asyncRoute(async (req, res) => {
       orderBy: [{ isLimited: "desc" }, { createdAt: "desc" }]
     }),
     prisma.ownedProfileDesign.findMany({ where: { userId }, select: { designId: true } }),
-    prisma.rewardInvite.findMany({ where: { buyerId: userId }, select: { accessKey: true, createdAt: true, access: { select: { used: true, usedCount: true } } }, orderBy: { createdAt: "desc" } }),
-    req.auth!.isOwner ? rewardSettings() : Promise.resolve(null)
+    prisma.rewardInvite.findMany({ where: { buyerId: userId, access: { used: false } }, select: { accessKey: true, createdAt: true, access: { select: { used: true, usedCount: true } } }, orderBy: { createdAt: "desc" } }),
+    rewardSettings()
   ]);
   const ownedIds = new Set(owned.map(item => item.designId));
   res.json({ user, products, designs: designs.map(item => ({ ...item, owned: ownedIds.has(item.id), using: item.id === user.activeProfileDesignId })), invites, rewardSettings: settings });
@@ -100,6 +101,34 @@ router.post("/designs/:id/purchase", asyncRoute(async (req, res) => {
   res.json(result);
 }));
 
+router.post("/transfer", asyncRoute(async (req, res) => {
+  const senderId = req.auth!.userId;
+  const { friendId, amount } = z.object({ friendId: z.string().length(16), amount: z.number().int().min(1).max(1_000_000) }).strict().parse(req.body);
+  if (friendId === senderId) return res.status(400).json({ error: "You cannot transfer coins to yourself" });
+  const result = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id IN (${senderId}, ${friendId}) ORDER BY id FOR UPDATE`;
+    const [sender, receiver, friendship] = await Promise.all([
+      tx.user.findUnique({ where: { id: senderId }, select: { coins: true, username: true } }),
+      tx.user.findUnique({ where: { id: friendId }, select: { coins: true, username: true } }),
+      tx.friendship.findUnique({ where: { userId_friendId: { userId: senderId, friendId } }, select: { userId: true } })
+    ]);
+    if (!sender || !receiver || !friendship) throw Object.assign(new Error("You can only transfer coins to an accepted friend"), { status: 403 });
+    if (sender.coins < amount) throw Object.assign(new Error("Not enough F4WE COIN"), { status: 409 });
+    const [updated] = await Promise.all([
+      tx.user.update({ where: { id: senderId }, data: { coins: { decrement: amount } }, select: { coins: true } }),
+      tx.user.update({ where: { id: friendId }, data: { coins: { increment: amount } } }),
+      tx.coinTransaction.createMany({ data: [
+        { userId: senderId, amount: -amount, reason: `friend.transfer.sent:${friendId}` },
+        { userId: friendId, amount, reason: `friend.transfer.received:${senderId}`, actorId: senderId }
+      ] })
+    ]);
+    return { coins: updated.coins, senderName: sender.username, receiverName: receiver.username };
+  });
+  notifyUser(senderId, "coinsChanged", { coins: result.coins });
+  await createUserNotification(friendId, "F4WE COIN received", `${result.senderName} sent you ${amount} F4WE COIN.`, { type: "coin_transfer", senderId });
+  res.json({ coins: result.coins, receiverName: result.receiverName });
+}));
+
 router.post("/designs/:id/use", asyncRoute(async (req, res) => {
   const userId = req.auth!.userId, designId = req.params.id as string;
   const owned = await prisma.ownedProfileDesign.findUnique({ where: { userId_designId: { userId, designId } }, include: { design: true } });
@@ -125,6 +154,7 @@ router.post("/owner/coins", ownerOnly, asyncRoute(async (req, res) => {
     return tx.user.update({ where: { id: userId }, data: { coins }, select: { id: true, username: true, coins: true } });
   });
   notifyUser(userId, "coinsChanged", { coins: updated.coins });
+  await createUserNotification(userId, amount > 0 ? "F4WE COIN added" : "F4WE COIN adjusted", `Owner changed your balance by ${amount > 0 ? "+" : ""}${amount}. New balance: ${updated.coins} F4WE COIN.`, { type: "coin_adjustment", amount });
   await audit("DEBUG", userId, "coins.owner_adjusted", { amount, coins: updated.coins, ownerId: req.auth!.userId });
   res.json(updated);
 }));

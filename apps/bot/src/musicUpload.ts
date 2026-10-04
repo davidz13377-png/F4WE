@@ -44,9 +44,23 @@ export async function addToStaffPlaylist(tx: Prisma.TransactionClient, musicId: 
   }
   if (!playlist) return;
   const last = await tx.albumSong.findFirst({ where: { albumId: playlist.id }, orderBy: { order: "desc" }, select: { order: true } });
-  await tx.albumSong.upsert({ where: { albumId_musicId: { albumId: playlist.id, musicId } }, create: { albumId: playlist.id, musicId, order: (last?.order ?? -1) + 1 }, update: {} });
+  const existing = await tx.albumSong.findUnique({ where: { albumId_musicId: { albumId: playlist.id, musicId } } });
+  if (existing) return;
+  const music = await tx.music.findUniqueOrThrow({ where: { id: musicId }, select: { duration: true } });
+  await tx.albumSong.create({ data: { albumId: playlist.id, musicId, order: (last?.order ?? -1) + 1 } });
+  await tx.album.update({ where: { id: playlist.id }, data: { cachedTrackCount: { increment: 1 }, cachedDuration: { increment: music.duration ?? 0 } } });
 }
 
 export async function findDuplicate(prisma: PrismaClient, title: string, artist: string) {
-  return prisma.music.findFirst({ where: { title: { equals: title, mode: "insensitive" }, artist: artist ? { equals: artist, mode: "insensitive" } : null }, select: { id: true, title: true, artist: true } });
+  const identity = musicIdentity(title, artist);
+  return prisma.music.findFirst({ where: identity, select: { id: true, title: true, artist: true } });
+}
+
+export function musicIdentity(title: string, artist?: string | null) {
+  const normalize = (value: string | null | undefined) => (value ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s*[([]\s*(?:feat|ft)\.?\s+[^)\]]+[)\]]/gi, " ")
+    .replace(/\s+(?:feat|ft)\.?\s+.*$/gi, " ")
+    .replace(/\b(?:official music video|official video|official audio|lyric video|lyrics?|official|audio|video|visuali[sz]er|hd|hq|4k|remaster(?:ed)?|clean|explicit)\b/gi, " ")
+    .toLocaleLowerCase("en-US").replace(/[^a-z0-9]+/g, "").slice(0, 300);
+  return { normalizedTitle: normalize(title), normalizedArtist: normalize(artist) };
 }

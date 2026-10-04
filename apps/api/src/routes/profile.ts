@@ -11,6 +11,7 @@ import { notifyUser, publishListening } from "../services/realtime.js";
 import { beginDirectUpload, completeDirectUpload, deleteImage, saveImage } from "../services/storage.js";
 import { canonicalSpotifyTrackUrl, spotifyTrackMetadata } from "../services/spotify.js";
 import { songView } from "../services/catalog.js";
+import { createBroadcastNotification, createUserNotification } from "../services/notifications.js";
 
 const router = Router();
 const pictureUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
@@ -35,11 +36,11 @@ router.get("/users/:id", asyncRoute(async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.params.id as string }, select: {
     id: true, username: true, rank: true, isOwner: true, profilePicture: true, bannerUrl: true, registrationDate: true,
     activeProfileDesign: { select: { assetUrl: true } },
-    albums: { where: { isPublic: true, isStaffPlaylist: false }, orderBy: { creationDate: "desc" }, include: { _count: { select: { songs: true } }, songs: { select: { music: { select: { duration: true } } } } } }
+    albums: { where: { isPublic: true, isStaffPlaylist: false }, orderBy: { creationDate: "desc" } }
   } });
   if (!user) return res.status(404).json({ error: "User not found" });
   const { activeProfileDesign, albums, ...details } = user;
-  res.json({ ...details, profileDesignUrl: activeProfileDesign?.assetUrl ?? null, playlists: albums.map(({ _count, songs, ...playlist }) => ({ ...playlist, trackCount: _count.songs, totalDuration: songs.reduce((sum, item) => sum + (item.music.duration ?? 0), 0) })) });
+  res.json({ ...details, profileDesignUrl: activeProfileDesign?.assetUrl ?? null, playlists: albums.map(({ cachedTrackCount, cachedDuration, ...playlist }) => ({ ...playlist, trackCount: cachedTrackCount, totalDuration: cachedDuration })) });
 }));
 
 router.patch("/me/listening-privacy", asyncRoute(async (req, res) => {
@@ -225,7 +226,9 @@ router.get("/updates", asyncRoute(async (_req, res) => {
 
 router.post("/updates", requireRank(Rank.Developer), asyncRoute(async (req, res) => {
   const { content } = z.object({ content: z.string().trim().min(1).max(5000) }).parse(req.body);
-  res.status(201).json(await prisma.updatePost.create({ data: { developerId: req.auth!.userId, content } }));
+  const post = await prisma.updatePost.create({ data: { developerId: req.auth!.userId, content } });
+  await createBroadcastNotification("New F4WE update", content.slice(0, 240), { type: "update_post", postId: post.id });
+  res.status(201).json(post);
 }));
 
 router.patch("/updates/:id", requireRank(Rank.Developer), asyncRoute(async (req, res) => {
@@ -263,9 +266,9 @@ router.patch("/staff/requests/:id", requireRank(Rank.Admin, Rank.Developer), asy
   const changed = await prisma.musicRequest.updateMany({ where: { id: existing.id, status: "Pending" }, data: { status: input.status, rejectionReason: input.reason, processedDate: new Date() } });
   if (!changed.count) return res.status(409).json({ error: "Request already being processed" });
   const item = await prisma.musicRequest.findUniqueOrThrow({ where: { id: existing.id } });
-  const body = input.status === "Accepted" ? `Your request was accepted: ${item.songsRequested}` : `Your request was rejected: ${input.reason}`;
-  const notification = await prisma.notification.create({ data: { userId: item.userId, title: `Music request ${input.status.toLowerCase()}`, body } });
-  notifyUser(item.userId, "notification", notification);
+  const reviewer = await prisma.user.findUniqueOrThrow({ where: { id: req.auth!.userId }, select: { username: true } });
+  const body = input.status === "Accepted" ? `${reviewer.username} accepted your request: ${item.songsRequested}` : `${reviewer.username} rejected your request: ${input.reason}`;
+  await createUserNotification(item.userId, `Music request ${input.status.toLowerCase()}`, body, { type: "music_request", requestId: item.id });
   await audit("MUSIC_REQUEST", item.userId, "music_request.reviewed", { requestId: item.id, status: input.status, reason: input.reason, reviewerId: req.auth!.userId });
   res.json(item);
 }));
@@ -290,9 +293,9 @@ router.get("/staff/bugs", requireRank(Rank.Admin, Rank.Developer), asyncRoute(as
 router.patch("/staff/bugs/:id", requireRank(Rank.Admin, Rank.Developer), asyncRoute(async (req, res) => {
   const input = z.object({ status: z.enum(["Fixed", "Rejected"]), reason: z.string().trim().max(1000).optional() }).refine(v => v.status !== "Rejected" || !!v.reason, { message: "A rejection reason is required" }).parse(req.body);
   const item = await prisma.bugReport.update({ where: { id: req.params.id as string }, data: { status: input.status, adminResponse: input.reason, resolvedDate: new Date() } });
-  const body = input.status === "Fixed" ? "Your bug report was marked as fixed." : `Your bug report was rejected: ${input.reason}`;
-  const notification = await prisma.notification.create({ data: { userId: item.userId, title: `Bug report ${input.status.toLowerCase()}`, body } });
-  notifyUser(item.userId, "notification", notification);
+  const reviewer = await prisma.user.findUniqueOrThrow({ where: { id: req.auth!.userId }, select: { username: true } });
+  const body = input.status === "Fixed" ? `${reviewer.username} marked your bug report as fixed.` : `${reviewer.username} rejected your bug report: ${input.reason}`;
+  await createUserNotification(item.userId, `Bug report ${input.status.toLowerCase()}`, body, { type: "bug_report", reportId: item.id });
   await audit("BUG_REPORT", item.userId, "bug_report.reviewed", { reportId: item.id, status: input.status, reason: input.reason, reviewerId: req.auth!.userId });
   res.json(item);
 }));

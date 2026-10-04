@@ -3,6 +3,7 @@ import { fetch as expoFetch } from "expo/fetch";
 import { File, UploadType } from "expo-file-system";
 
 export const API_URL = (process.env.EXPO_PUBLIC_API_URL || Constants.expoConfig?.extra?.apiUrl || "http://localhost:4000") as string;
+export const APP_VERSION = Constants.expoConfig?.version || "0.0.0";
 let authToken: string | null = null;
 export const setApiToken = (token: string | null) => { authToken = token; };
 
@@ -58,7 +59,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const isForm = isFormDataBody(options.body);
   const response = await expoFetch(`${API_URL}${path}`, {
     ...options,
-    headers: { ...(!isForm ? { "Content-Type": "application/json" } : {}), ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...options.headers }
+    headers: { ...(!isForm ? { "Content-Type": "application/json" } : {}), "X-F4WE-Version": APP_VERSION, ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...options.headers }
   });
   return readResponse<T>(response);
 }

@@ -4,6 +4,9 @@ import { fileTypeFromBuffer } from "file-type";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import { randomUUID } from "node:crypto";
 import { createReadStream, promises as fs } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { spawn } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { env } from "../env.js";
@@ -240,6 +243,34 @@ export async function deleteMusic(reference: string) {
   if (!key) await fs.unlink(reference).catch(error => {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   });
+}
+
+function runFfmpeg(args: string[]) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], { stdio: ["ignore", "ignore", "pipe"] });
+    let error = "";
+    child.stderr.on("data", chunk => { error += String(chunk).slice(0, 4000); });
+    child.once("error", reject);
+    child.once("close", code => code === 0 ? resolve() : reject(new Error(`Audio cut failed${error ? `: ${error.trim()}` : ""}`)));
+  });
+}
+
+export async function cutMusic(reference: string, startSeconds: number, endSeconds: number) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "f4we-cut-"));
+  const input = path.join(directory, "input.mp3"), output = path.join(directory, "output.mp3");
+  try {
+    const source = await openMusic(reference);
+    if (!source) throw new Error("Music file could not be opened");
+    await pipeline(source.body, (await import("node:fs")).createWriteStream(input));
+    await runFfmpeg(["-ss", String(startSeconds), "-to", String(endSeconds), "-i", input, "-vn", "-codec:a", "libmp3lame", "-q:a", "2", output]);
+    const buffer = await fs.readFile(output);
+    if ((await fileTypeFromBuffer(buffer))?.mime !== "audio/mpeg") throw new Error("The cut output is not a valid MP3");
+    const duration = mp3DurationSeconds(buffer);
+    if (!duration) throw new Error("The cut output is empty");
+    return { reference: await saveMusic(buffer), duration };
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 }
 
 function parseRange(value: string | undefined, size: number) {

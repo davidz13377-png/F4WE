@@ -31,14 +31,17 @@ export async function addSongToStaffPlaylist(musicId: string, db: Db = prisma) {
   const exists = await db.albumSong.findUnique({ where: { albumId_musicId: { albumId: playlist.id, musicId } } });
   if (exists) return;
   const last = await db.albumSong.findFirst({ where: { albumId: playlist.id }, orderBy: { order: "desc" }, select: { order: true } });
+  const music = await db.music.findUniqueOrThrow({ where: { id: musicId }, select: { duration: true } });
   await db.albumSong.create({ data: { albumId: playlist.id, musicId, order: (last?.order ?? -1) + 1 } });
+  await db.album.update({ where: { id: playlist.id }, data: { cachedTrackCount: { increment: 1 }, cachedDuration: { increment: music.duration ?? 0 } } });
 }
 
 export async function backfillStaffPlaylist() {
   const playlist = await ensureStaffPlaylist();
   if (!playlist) return;
-  const songs = await prisma.music.findMany({ where: { albums: { none: { albumId: playlist.id } } }, select: { id: true }, orderBy: { uploadDate: "asc" } });
+  const songs = await prisma.music.findMany({ where: { albums: { none: { albumId: playlist.id } } }, select: { id: true, duration: true }, orderBy: { uploadDate: "asc" } });
   if (!songs.length) return;
   const last = await prisma.albumSong.findFirst({ where: { albumId: playlist.id }, orderBy: { order: "desc" }, select: { order: true } });
   await prisma.albumSong.createMany({ data: songs.map((song, index) => ({ albumId: playlist.id, musicId: song.id, order: (last?.order ?? -1) + index + 1 })), skipDuplicates: true });
+  await prisma.album.update({ where: { id: playlist.id }, data: { cachedTrackCount: { increment: songs.length }, cachedDuration: { increment: songs.reduce((sum, song) => sum + (song.duration ?? 0), 0) } } });
 }

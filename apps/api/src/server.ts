@@ -8,6 +8,7 @@ import { prisma } from "./db.js";
 import { addListeningFollower, notifyUser, presenceFor, publishListening, removeListeningFollower, setSocketServer, userConnected, userDisconnected } from "./services/realtime.js";
 import { audit } from "./services/logging.js";
 import { backfillStaffPlaylist } from "./services/staffPlaylist.js";
+import { backfillMusicIdentities } from "./services/musicIdentityBackfill.js";
 
 const server = createServer(app);
 const io = new Server(server, { cors: { origin: env.CORS_ORIGINS.split(",").map(v => v.trim()) } });
@@ -85,6 +86,7 @@ io.on("connection", socket => {
 });
 setSocketServer(io);
 void backfillStaffPlaylist().catch(error => console.error("Staff Playlist sync failed", error));
+void backfillMusicIdentities().catch(error => console.error("Music identity sync failed", error));
 
 let lastRankCheck = new Date();
 setInterval(async () => {

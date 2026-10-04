@@ -6,7 +6,7 @@ import { useCallback, useState } from "react";
 import { Redirect, useFocusEffect } from "expo-router";
 import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Button, Empty, Input, Screen, Title, ui } from "../../src/components/UI";
+import { Button, Card, Empty, Input, Screen, Title, ui } from "../../src/components/UI";
 import { useAuth } from "../../src/context/AuthContext";
 import { useLibrary } from "../../src/context/LibraryContext";
 import { usePlayer } from "../../src/context/PlayerContext";
@@ -20,6 +20,7 @@ export default function MusicManager() {
   const { user, loading } = useAuth(), library = useLibrary(), player = usePlayer();
   const insets = useSafeAreaInsets();
   const [editing, setEditing] = useState<Song | null>(null), [title, setTitle] = useState(""), [artist, setArtist] = useState("");
+  const [releaseDate, setReleaseDate] = useState(""), [cutStart, setCutStart] = useState("0"), [cutEnd, setCutEnd] = useState(""), [songInfo, setSongInfo] = useState<{ playCount: number; uploadDate: string; releaseDate?: string | null; duration?: number | null } | null>(null);
   const [lyricsFile, setLyricsFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null), [lyricsType, setLyricsType] = useState<"timed" | "plain">("timed");
   const [songs, setSongs] = useState<Song[]>([]), [total, setTotal] = useState(0), [query, setQuery] = useState(""), [busy, setBusy] = useState<string | null>(null), [error, setError] = useState("");
   const canDelete = !!user?.isOwner || user?.rank === "Admin" || user?.rank === "Developer";
@@ -32,13 +33,13 @@ export default function MusicManager() {
   useFocusEffect(useCallback(() => { const timer = setTimeout(() => void load(), 300); return () => clearTimeout(timer); }, [load]));
   if (loading) return <Screen><ActivityIndicator color={colors.accent} /></Screen>;
   if (!allowed) return <Redirect href="/(tabs)/profile" />;
-  const edit = (song: Song) => { if (busy) return; setEditing(song); setTitle(song.title); setArtist(song.artist || ""); setLyricsFile(null); setLyricsType(song.lyricsSynced ? "timed" : "plain"); };
+  const edit = (song: Song) => { if (busy) return; setEditing(song); setTitle(song.title); setArtist(song.artist || ""); setReleaseDate(song.releaseDate?.slice(0, 10) || ""); setLyricsFile(null); setLyricsType(song.lyricsSynced ? "timed" : "plain"); setCutStart("0"); setCutEnd(String(song.duration || "")); setSongInfo(null); void api<{ playCount: number; uploadDate: string; releaseDate?: string | null; duration?: number | null }>(`/api/music/${encodeURIComponent(song.id)}/info`).then(value => { setSongInfo(value); setReleaseDate(value.releaseDate?.slice(0, 10) || ""); if (!song.duration && value.duration) setCutEnd(String(value.duration)); }).catch(() => undefined); };
   const save = async () => {
     if (!editing || busy) return;
     if (!title.trim()) return Alert.alert("Title required", "Enter a song title.");
     setBusy(editing.id);
     try {
-      const updated = await api<Song>("/api/music/" + encodeURIComponent(editing.id), { method: "PATCH", body: JSON.stringify({ title: title.trim(), artist: artist.trim() || null }) });
+      const updated = await api<Song>("/api/music/" + encodeURIComponent(editing.id), { method: "PATCH", body: JSON.stringify({ title: title.trim(), artist: artist.trim() || null, releaseDate: releaseDate.trim() || null }) });
       setSongs(items => items.map(item => item.id === updated.id ? updated : item));
       setEditing(null); await player.updateSongMetadata(updated); await library.refresh(); await load();
     } catch (e) { Alert.alert("Could not save song", e instanceof Error ? e.message : "Try again"); }
@@ -104,6 +105,12 @@ export default function MusicManager() {
       }).catch(e => Alert.alert("Could not remove lyrics", e.message)).finally(() => setBusy(null));
     } }]);
   };
+  const cutSong = () => {
+    if (!editing || busy) return;
+    const startSeconds = Number(cutStart), endSeconds = Number(cutEnd);
+    if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds - startSeconds < 1) return Alert.alert("Invalid cut range", "Enter a valid start and end in seconds, keeping at least one second.");
+    Alert.alert("Cut this MP3?", `Keep audio from ${startSeconds}s to ${endSeconds}s. The original stored file will be replaced.`, [{ text: "Cancel" }, { text: "Cut and save", style: "destructive", onPress: () => { setBusy(editing.id); void api<Song>(`/api/music/${encodeURIComponent(editing.id)}/cut`, { method: "POST", body: JSON.stringify({ startSeconds, endSeconds }) }).then(async updated => { setEditing(updated); setSongs(items => items.map(item => item.id === updated.id ? updated : item)); await player.updateSongMetadata(updated); await library.refresh(); Alert.alert("Music cut saved", `New duration: ${updated.duration ?? "unknown"} seconds.`); }).catch(e => Alert.alert("Could not cut music", e.message)).finally(() => setBusy(null)); } }]);
+  };
   return <Screen><View style={[ui.row, { alignItems: "flex-start", gap: 12 }]}><View style={{ flex: 1 }}><Title subtitle="Moderator / Admin / Developer: edit song details and artwork.">Music Manager</Title></View><View style={{ backgroundColor: colors.raised, borderRadius: 99, paddingHorizontal: 13, paddingVertical: 8 }}><Text style={{ color: colors.softRed, fontWeight: "900" }}>{total} songs</Text></View></View><Input placeholder="Search songs or artists" maxLength={100} value={query} onChangeText={setQuery} />
     {error ? <Text style={{ color: colors.red }}>{error}</Text> : null}
     {songs.map(song => <View key={song.id} style={[ui.row, { justifyContent: "space-between", gap: 14, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border }]}>
@@ -120,6 +127,9 @@ export default function MusicManager() {
             {editing?.artworkUrl ? <View style={{ marginTop: 8 }}><Button title="Remove artwork" tone="dark" loading={!!busy} onPress={() => void changePicture(true)} /></View> : null}
             <Text style={ui.label}>Title</Text><Input accessibilityLabel="Song title" value={title} maxLength={150} onChangeText={setTitle} editable={!busy} placeholder="Song title" />
             <Text style={ui.label}>Artist</Text><Input accessibilityLabel="Artist" value={artist} maxLength={150} onChangeText={setArtist} editable={!busy} placeholder="Artist (optional)" />
+            <Text style={ui.label}>Release date (optional)</Text><Input accessibilityLabel="Release date" value={releaseDate} maxLength={10} onChangeText={setReleaseDate} editable={!busy} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
+            {songInfo ? <Card><Text style={[ui.body, { fontWeight: "900" }]}>{songInfo.playCount} total plays</Text><Text style={ui.muted}>{songInfo.releaseDate ? "Released" : "Added"} {new Date(songInfo.releaseDate || songInfo.uploadDate).toLocaleDateString("en-GB", { year: "numeric", month: "long", day: "numeric" })}</Text></Card> : null}
+            <Text style={[ui.label, { marginTop: 6 }]}>Cut Music</Text><Text style={[ui.muted, { marginBottom: 8 }]}>Remove unwanted audio from the beginning or end. Enter seconds.</Text><View style={{ flexDirection: "row", gap: 8 }}><View style={{ flex: 1 }}><Input value={cutStart} onChangeText={setCutStart} keyboardType="decimal-pad" placeholder="Start seconds" /></View><View style={{ flex: 1 }}><Input value={cutEnd} onChangeText={setCutEnd} keyboardType="decimal-pad" placeholder="End seconds" /></View></View><Button title="Cut and replace music" icon="cut-outline" tone="dark" loading={!!busy} onPress={cutSong} />
             <Text style={[ui.label, { marginTop: 6 }]}>Lyrics {editing?.hasLyrics ? "• added" : "• not added yet"}</Text>
             <View style={{ flexDirection: "row", backgroundColor: colors.raised, borderRadius: 14, padding: 4, marginBottom: 10 }}><LyricsMode label="Timed .lrc" selected={lyricsType === "timed"} onPress={() => { setLyricsType("timed"); setLyricsFile(null); }} /><LyricsMode label="Plain .txt" selected={lyricsType === "plain"} onPress={() => { setLyricsType("plain"); setLyricsFile(null); }} /></View>
             <Button title={lyricsFile?.name || `Choose ${lyricsType === "timed" ? ".lrc" : ".txt"} file`} icon="document-text-outline" tone="dark" loading={!!busy} onPress={() => void chooseLyrics()} />

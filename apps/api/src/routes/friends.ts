@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { authenticate } from "../middleware/auth.js";
 import { asyncRoute } from "../middleware/errors.js";
 import { presenceFor, revokeListeningJoin } from "../services/realtime.js";
+import { songView } from "../services/catalog.js";
 
 const router = Router();
 router.use(authenticate);
@@ -39,6 +40,24 @@ router.get("/search", asyncRoute(async (req, res) => {
 router.get("/requests", asyncRoute(async (req, res) => {
   const requests = await prisma.friendRequest.findMany({ where: { receiverId: req.auth!.userId }, orderBy: { createdAt: "desc" }, include: { sender: { select: publicUser } } });
   res.json(requests.map(({ sender, ...request }) => ({ ...request, sender: userView(sender) })));
+}));
+
+router.get("/charts", asyncRoute(async (req, res) => {
+  const friendships = await prisma.friendship.findMany({ where: { userId: req.auth!.userId }, select: { friendId: true } });
+  const friendIds = friendships.map(item => item.friendId);
+  if (!friendIds.length) return res.json([]);
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const grouped = await prisma.musicPlay.groupBy({
+    by: ["musicId"], where: { userId: { in: friendIds }, playedAt: { gte: since } },
+    _sum: { listenedSeconds: true }, _count: { id: true },
+    orderBy: [{ _sum: { listenedSeconds: "desc" } }, { _count: { id: "desc" } }], take: 10
+  });
+  const songs = await prisma.music.findMany({ where: { id: { in: grouped.map(item => item.musicId) } } });
+  const byId = new Map(songs.map(song => [song.id, song]));
+  res.json(grouped.flatMap(item => {
+    const song = byId.get(item.musicId);
+    return song ? [{ ...songView(song), friendPlayCount: item._count.id, friendListenedSeconds: item._sum.listenedSeconds ?? 0 }] : [];
+  }));
 }));
 
 router.post("/requests", asyncRoute(async (req, res) => {

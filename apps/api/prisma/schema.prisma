@@ -61,6 +61,8 @@ model User {
   coinTransactions        CoinTransaction[]    @relation("CoinOwner")
   coinTransactionsMade    CoinTransaction[]    @relation("CoinActor")
   rewardInvites           RewardInvite[]
+  playlistCollaborations  PlaylistCollaborator[]
+  pushTokens              PushToken[]
 }
 
 model AccessKey {
@@ -87,10 +89,15 @@ model Music {
   lyricsSynced Boolean     @default(false)
   uploaderId   String?     @db.Char(16)
   uploadDate   DateTime    @default(now())
+  releaseDate  DateTime?
+  normalizedTitle  String  @default("")
+  normalizedArtist String  @default("")
   uploader     User?       @relation("Uploader", fields: [uploaderId], references: [id], onDelete: SetNull)
   albums       AlbumSong[]
   favorites    Favorite[]
   plays        MusicPlay[]
+
+  @@index([normalizedTitle, normalizedArtist])
 }
 
 model MusicPlay {
@@ -139,9 +146,23 @@ model Album {
   creationDate    DateTime     @default(now())
   isPublic        Boolean      @default(false)
   isStaffPlaylist Boolean      @default(false)
+  cachedTrackCount Int         @default(0)
+  cachedDuration   Int         @default(0)
   creator         User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
   songs           AlbumSong[]
   savedBy         SavedAlbum[]
+  collaborators   PlaylistCollaborator[]
+}
+
+model PlaylistCollaborator {
+  albumId  String
+  userId   String   @db.Char(16)
+  addedAt  DateTime @default(now())
+  album    Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([albumId, userId])
+  @@index([userId, addedAt])
 }
 
 model AlbumSong {
@@ -226,6 +247,17 @@ model Notification {
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PushToken {
+  token     String   @id
+  userId    String   @db.Char(16)
+  platform  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model UserRanksHistory {

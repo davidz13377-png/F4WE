@@ -20,12 +20,14 @@ function matches(row, where = {}) {
   }
   if (where.name && !row.name.toLowerCase().includes(where.name.contains.toLowerCase())) return false;
   if (where.savedBy && !saved.some(s => s.albumId === row.id && s.userId === where.savedBy.some.userId)) return false;
+  if (where.collaborators) return false;
   return true;
 }
 function fullAlbum(a, include = {}) {
   if (!a) return null;
-  return { ...a, creator: a.creatorId === owner.id ? owner : other, _count: { songs: links.filter(l => l.albumId === a.id).length },
+  return { cachedTrackCount: links.filter(l => l.albumId === a.id).length, cachedDuration: links.filter(l => l.albumId === a.id).reduce((sum, link) => sum + (songs.find(song => song.id === link.musicId)?.duration ?? 0), 0), ...a, creator: a.creatorId === owner.id ? owner : other, _count: { songs: links.filter(l => l.albumId === a.id).length },
     savedBy: saved.filter(s => s.albumId === a.id && (!include.savedBy?.where || s.userId === include.savedBy.where.userId)),
+    collaborators: [],
     songs: links.filter(l => l.albumId === a.id).sort((a, b) => a.order - b.order).map(l => ({ ...l, music: { ...songs.find(s => s.id === l.musicId), favorites: favorites.filter(f => f.musicId === l.musicId && f.userId === actor.id) } })) };
 }
 const db = {
@@ -33,21 +35,32 @@ const db = {
     findMany: async ({ where, include }) => albums.filter(a => matches(a, where)).map(a => fullAlbum(a, include)),
     findFirst: async ({ where, include }) => fullAlbum(albums.find(a => matches(a, where)), include),
     findUnique: async ({ where }) => albums.find(a => a.id === where.id) || null,
-    create: async ({ data }) => { const a = { id: "p" + ++sequence, creationDate: new Date(), isStaffPlaylist: false, ...data }; albums.push(a); return fullAlbum(a); },
-    update: async ({ where, data }) => { const a = albums.find(a => a.id === where.id); Object.assign(a, data); return a; },
+    create: async ({ data }) => { const a = { id: "p" + ++sequence, creationDate: new Date(), isStaffPlaylist: false, cachedTrackCount: 0, cachedDuration: 0, ...data }; albums.push(a); return fullAlbum(a); },
+    update: async ({ where, data }) => { const a = albums.find(a => a.id === where.id); for (const [key, value] of Object.entries(data)) a[key] = value && typeof value === "object" && "increment" in value ? (a[key] ?? 0) + value.increment : value && typeof value === "object" && "decrement" in value ? (a[key] ?? 0) - value.decrement : value; return a; },
     updateMany: async ({ where, data }) => { const match = albums.filter(a => matches(a, where)); match.forEach(a => Object.assign(a, data)); return { count: match.length }; },
     deleteMany: async ({ where }) => { const ids = albums.filter(a => matches(a, where)).map(a => a.id); albums = albums.filter(a => !ids.includes(a.id)); links = links.filter(l => !ids.includes(l.albumId)); saved = saved.filter(s => !ids.includes(s.albumId)); return { count: ids.length }; }
   },
   albumSong: {
-    findUnique: async ({ where }) => links.find(l => matches(l, where.albumId_musicId)) || null,
+    findUnique: async ({ where, include }) => { const row = links.find(l => matches(l, where.albumId_musicId)); return row && include?.music ? { ...row, music: songs.find(song => song.id === row.musicId) } : row || null; },
+    findMany: async ({ where }) => links.filter(l => matches(l, where)),
     count: async ({ where }) => links.filter(l => matches(l, where)).length,
     findFirst: async ({ where }) => links.filter(l => matches(l, where)).sort((a, b) => b.order - a.order)[0] || null,
     create: async ({ data }) => { links.push(data); return data; },
+    update: async ({ where, data }) => { const row = links.find(l => matches(l, where.albumId_musicId)); Object.assign(row, data); return row; },
+    delete: async ({ where }) => { const index = links.findIndex(l => matches(l, where.albumId_musicId)); return links.splice(index, 1)[0]; },
     deleteMany: async ({ where }) => { const old = links.length; links = links.filter(l => !matches(l, where)); return { count: old - links.length }; }
   },
   music: {
     findUnique: async ({ where }) => songs.find(s => s.id === where.id) || null,
-    findFirst: async ({ where }) => songs.find(s => (!where.title || s.title?.toLowerCase() === where.title.equals.toLowerCase()) && (where.artist === null ? !s.artist : !where.artist || s.artist?.toLowerCase() === where.artist.equals.toLowerCase())) || null,
+    findUniqueOrThrow: async ({ where }) => { const song = songs.find(s => s.id === where.id); if (!song) throw new Error("Song not found"); return song; },
+    findFirst: async ({ where }) => songs.find(s => {
+      if (where.id?.not === s.id) return false;
+      if (where.normalizedTitle !== undefined) {
+        const identity = normalizeIdentity(s.title, s.artist);
+        return identity.normalizedTitle === where.normalizedTitle && identity.normalizedArtist === where.normalizedArtist;
+      }
+      return (!where.title || s.title?.toLowerCase() === where.title.equals.toLowerCase()) && (where.artist === null ? !s.artist : !where.artist || s.artist?.toLowerCase() === where.artist.equals.toLowerCase());
+    }) || null,
     count: async () => songs.length,
     findMany: async ({ where }) => songs.filter(s => !where.id || where.id.in.includes(s.id)).map(s => ({ ...s, favorites: favorites.filter(f => f.musicId === s.id && f.userId === actor.id) })),
     create: async ({ data }) => { const song = { id: "s" + ++sequence, uploadDate: new Date(), mimeType: "audio/mpeg", ...data }; songs.push(song); return song; },
@@ -63,6 +76,7 @@ const db = {
     upsert: async ({ create }) => { if (!saved.some(s => matches(s, create))) saved.push(create); },
     deleteMany: async ({ where }) => { saved = saved.filter(s => s.albumId !== where.albumId || (typeof where.userId === "object" ? s.userId === where.userId.not : s.userId !== where.userId)); }
   },
+  playlistCollaborator: { upsert: async () => ({}), deleteMany: async () => ({ count: 0 }) },
   logEvent: { create: async ({ data }) => logs.push(data) },
   notification: { create: async ({ data }) => ({ id: "n" + ++sequence, ...data }) },
   musicRequest: {
@@ -81,7 +95,7 @@ const db = {
   accessKey: { findUnique: async ({ where }) => where.key === customKey.key ? customKey : null, update: async ({ data }) => Object.assign(customKey, data) },
   rewardInvite: { findUnique: async () => null },
   user: { findUnique: async ({ where }) => registered.find(u => u.id === where.id || u.username === where.username) || null, findFirst: async ({ where }) => registered.find(u => (!where.NOT?.id || u.id !== where.NOT.id) && (!where.username || u.username.toLowerCase() === where.username.equals.toLowerCase())) || null, create: async ({ data }) => { const user = { id: data.id, username: data.username, rank: "Access", isOwner: false, profilePicture: null, bannerUrl: null, coins: 0, registrationDate: new Date(), ...data }; registered.push(user); return user; }, findMany: async ({ where, select }) => { assert.deepEqual(where.OR[1].rank.in.join(","), "Moderator,Admin,Developer"); assert.ok(!select.passwordHash); return [{ ...other, rank: "Admin" }]; }, update: async ({ where, data }) => ({ id: where.id, ...data }), updateMany: async ({ where, data }) => { const matches = registered.filter(u => u.id === where.id && (!where.isOwner || !u.isOwner)); matches.forEach(u => Object.assign(u, data)); return { count: matches.length }; }, deleteMany: async ({ where }) => { const count = registered.filter(u => u.id === where.id && !u.isOwner).length; registered = registered.filter(u => u.id !== where.id || u.isOwner); return { count }; }, findUniqueOrThrow: async ({ where }) => registered.find(u => u.id === where.id) || { id: where.id, profilePicture: null, animatedProfileUnlocked: false } },
-  $queryRaw: async () => [], $transaction: async cb => cb(db)
+  $queryRaw: async () => [], $executeRaw: async () => 0, $transaction: async cb => cb(db)
 };
 const env = { PUBLIC_API_URL: "http://127.0.0.1:4000", MAX_MP3_MB: 25, UPLOAD_DIR: "uploads", JWT_SECRET: "test-secret-that-is-more-than-32-characters" };
 const realAuth = load("apps/api/src/middleware/auth.ts", { "../env.js": { env }, "../db.js": { prisma: db } });
@@ -114,10 +128,14 @@ const storageMock = {
   },
   saveMusic: async buffer => { const value = path.resolve(env.UPLOAD_DIR, `test-${Date.now()}.mp3`); fs.writeFileSync(value, buffer); return value; },
   deleteMusic: async value => { try { fs.unlinkSync(value); } catch {} },
-  openMusic: async () => null, mp3DurationSeconds: () => null,
+  openMusic: async () => null, cutMusic: async value => value, mp3DurationSeconds: () => null,
   storedMusicName: value => path.basename(value)
 };
-const mocks = { "../db.js": { prisma: db }, "../middleware/auth.js": auth, "../middleware/errors.js": errors, "../env.js": { env }, "../services/catalog.js": catalog, "../services/logging.js": { audit: async () => {} }, "../services/realtime.js": { notifyUser: () => {}, publishListening: () => {} }, "../services/staffPlaylist.js": { isStaff: (rank, isOwner) => isOwner || ["Moderator", "Admin", "Developer"].includes(rank), addSongToStaffPlaylist: async () => {} }, "../services/storage.js": storageMock, "../services/spotify.js": {
+const normalizeIdentity = (title, artist) => ({
+  normalizedTitle: String(title ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, ""),
+  normalizedArtist: String(artist ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "")
+});
+const mocks = { "../db.js": { prisma: db }, "../middleware/auth.js": auth, "../middleware/errors.js": errors, "../env.js": { env }, "../services/catalog.js": catalog, "../services/logging.js": { audit: async () => {} }, "../services/realtime.js": { notifyUser: () => {}, publishListening: () => {} }, "../services/notifications.js": { createUserNotification: async () => {}, createBroadcastNotification: async () => {} }, "../services/musicIdentity.js": { musicIdentity: normalizeIdentity }, "../services/staffPlaylist.js": { isStaff: (rank, isOwner) => isOwner || ["Moderator", "Admin", "Developer"].includes(rank), addSongToStaffPlaylist: async () => {} }, "../services/storage.js": storageMock, "../services/spotify.js": {
   canonicalSpotifyTrackUrl: url => url.protocol === "https:" && url.hostname === "open.spotify.com" && /^\/track\/[A-Za-z0-9]{22}$/.test(url.pathname) ? `https://open.spotify.com${url.pathname}` : null,
   spotifyTrackMetadata: async () => ({ title: "Spotify test track", artworkUrl: "https://i.scdn.co/image/test" })
 }, "file-type": { fileTypeFromBuffer: buffer => detector(buffer) } };
@@ -290,10 +308,11 @@ async function main() {
   console.log("PASS: update Edit/Delete controls hidden for Access/Admin and other Developers, even for a demoted post author.");
   const actions = [];
   const row = load("apps/mobile/src/components/SongRow.tsx", {
-    "react/jsx-runtime": { jsx, jsxs: jsx }, "@expo/vector-icons": { Ionicons: "Icon" },
-    "react-native": { Alert: {}, Image: "Image", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { create: s => s } },
+    react: { useState: value => [value, () => {}], useRef: value => ({ current: value }) }, "react/jsx-runtime": { jsx, jsxs: jsx }, "@expo/vector-icons": { Ionicons: "Icon" },
+    "react-native": { Alert: {}, Image: "Image", Modal: "Modal", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { create: s => s } },
     "../lib/theme": { colors: {} }, "../context/PlayerContext": { usePlayer: () => ({ play: async s => actions.push("play:" + s.id) }) },
-    "../context/LibraryContext": { useLibrary: () => ({ isFavorite: () => false, choosePlaylist: s => actions.push("add:" + s.id), toggleFavorite: async s => actions.push("like:" + s.id) }) }
+    "../context/LibraryContext": { useLibrary: () => ({ isFavorite: () => false, choosePlaylist: s => actions.push("add:" + s.id), toggleFavorite: async s => actions.push("like:" + s.id) }) },
+    "../lib/api": { api: async () => ({ playCount: 0, uploadDate: new Date().toISOString() }) }
   });
   const rendered = row.SongRow({ song: { id: "s1", title: "One", streamUrl: "test" } });
   assert.equal(rendered.type, "View"); const controls = rendered.props.children.slice(1, 4);

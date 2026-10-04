@@ -4,7 +4,7 @@ import { PrismaClient, Rank } from "@prisma/client";
 import { authorized, env } from "./env.js";
 import { importQueuedRequests } from "./importRequests.js";
 import { downloadLyricsFile, type LyricsType } from "./lyrics.js";
-import { addToStaffPlaylist, downloadDiscordMp3, findDuplicate, removeMusicObject, uploadMusicObject } from "./musicUpload.js";
+import { addToStaffPlaylist, downloadDiscordMp3, findDuplicate, musicIdentity, removeMusicObject, uploadMusicObject } from "./musicUpload.js";
 
 const prisma = new PrismaClient();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -232,7 +232,7 @@ async function onCommand(interaction: ChatInputCommandInteraction) {
     const stored = await uploadMusicObject(buffer);
     try {
       const song = await prisma.$transaction(async tx => {
-        const created = await tx.music.create({ data: { title, artist, artworkUrl, filePath: stored.reference, mimeType: "audio/mpeg" } });
+        const created = await tx.music.create({ data: { title, artist, ...musicIdentity(title, artist), artworkUrl, filePath: stored.reference, mimeType: "audio/mpeg" } });
         await addToStaffPlaylist(tx, created.id);
         await tx.logEvent.create({ data: { type: "MUSIC_UPLOAD", userId: interaction.user.id, actionType: "music.uploaded_from_discord", details: { musicId: created.id, title, artist, filename: attachment.name, uploadedByDiscordId: interaction.user.id } } });
         return created;
