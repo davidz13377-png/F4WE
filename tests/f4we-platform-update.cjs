@@ -67,7 +67,16 @@ assert.ok(flexibleIdMigration.includes('ALTER TABLE "User" ALTER COLUMN "id" TYP
 const appJson = JSON.parse(read("apps/mobile/app.json"));
 assert.equal(appJson.expo.version, "1.1.0");
 assert.equal(appJson.expo.android.versionCode, 2);
+assert.equal(appJson.expo.android.googleServicesFile, "./google-services.json");
 assert.ok(appJson.expo.plugins.some(plugin => Array.isArray(plugin) && plugin[0] === "expo-notifications"));
 assert.ok(fs.statSync(path.join(root, "apps/mobile/assets/F4WE-icon.png")).size > 10_000, "New F4WE app icon is missing");
+const firebaseConfig = JSON.parse(read("apps/mobile/google-services.json"));
+const nativeFirebaseConfig = JSON.parse(read("apps/mobile/android/app/google-services.json"));
+const firebasePackage = firebaseConfig.client?.[0]?.client_info?.android_client_info?.package_name;
+const nativeFirebasePackage = nativeFirebaseConfig.client?.[0]?.client_info?.android_client_info?.package_name;
+assert.equal(firebasePackage, "com.musicbox.app", "Firebase package does not match the Android app");
+assert.equal(nativeFirebasePackage, firebasePackage, "Native Firebase config is not synced from the Expo config");
+assert.ok(read("apps/mobile/android/build.gradle").includes("com.google.gms:google-services"), "Google Services Gradle plugin is missing");
+assert.ok(read("apps/mobile/android/app/build.gradle").includes("apply plugin: 'com.google.gms.google-services'"), "Google Services app plugin is missing");
 
-console.log("PASS: cached playlists, canonical duplicates, release dates, reorder/collaboration, forced updates, maintenance, push, coins, charts, audio cuts and song info are wired.");
+console.log("PASS: cached playlists, canonical duplicates, release dates, reorder/collaboration, forced updates, maintenance, Firebase push, coins, charts, audio cuts and song info are wired.");
