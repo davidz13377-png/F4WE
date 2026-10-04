@@ -41,7 +41,7 @@
         "expo-notifications",
         {
           "icon": "./assets/android/drawable/f4we_notification.png",
-          "color": "#E86B72",
+          "color": "#000000",
           "defaultChannel": "f4we"
         }
       ]
