@@ -13,7 +13,6 @@ import { songView } from "../services/catalog.js";
 import { beginDirectUpload, completeDirectUpload, cutMusic, deleteImage, deleteMusic, mp3DurationSeconds, openMusic, saveImage, saveMusic, storedMusicName } from "../services/storage.js";
 import { addSongToStaffPlaylist } from "../services/staffPlaylist.js";
 import { musicIdentity } from "../services/musicIdentity.js";
-import { createUserNotification } from "../services/notifications.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_MP3_MB * 1024 * 1024, files: 1 } });
@@ -341,7 +340,6 @@ router.patch("/:id/play/:playId", asyncRoute(async (req, res) => {
   if (!reward) return res.status(404).json({ error: "Listening session not found" });
   if (reward.granted && reward.coins !== null) {
     notifyUser(userId, "coinsChanged", { coins: reward.coins, granted: reward.granted });
-    await createUserNotification(userId, "F4WE COIN earned", `You earned ${reward.granted} F4WE COIN for listening.`, { type: "listening_reward", granted: reward.granted });
   }
   res.status(204).end();
 }));

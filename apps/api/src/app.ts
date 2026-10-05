@@ -13,6 +13,7 @@ import developerRoutes from "./routes/developer.js";
 import friendRoutes from "./routes/friends.js";
 import shopRoutes from "./routes/shop.js";
 import systemRoutes from "./routes/system.js";
+import shareRoutes from "./routes/share.js";
 import { env } from "./env.js";
 import { asyncRoute, errorHandler } from "./middleware/errors.js";
 import { openImage, usingR2Storage } from "./services/storage.js";
@@ -25,6 +26,7 @@ app.set("trust proxy", 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(cors({ origin: env.CORS_ORIGINS.split(",").map(v => v.trim()), credentials: false }));
 app.use(express.json({ limit: "256kb" }));
+app.use("/share", shareRoutes);
 if (usingR2Storage) {
   app.get("/media/:category/:filename", asyncRoute(async (req, res) => {
     const category = req.params.category;

@@ -62,7 +62,16 @@ assert.ok(developer.includes('/users/:id/app-id') && developer.includes('/staff-
 assert.ok(friends.includes('/charts') && owner.includes("Publish required update") && owner.includes("Maintenance break"), "Friend charts or Owner controls are missing");
 const flexibleIdMigration = read("apps/api/prisma/migrations/20261005000000_flexible_user_ids/migration.sql");
 assert.ok(schema.includes("@db.VarChar(32)") && !schema.includes("@db.Char(16)"), "User IDs are still fixed to 16 characters");
-assert.ok(flexibleIdMigration.includes('ALTER TABLE "User" ALTER COLUMN "id" TYPE VARCHAR(32)') && developer.includes("/^\\d{4,32}$/"), "Flexible 4-32 digit App IDs are incomplete");
+assert.ok(flexibleIdMigration.includes('ALTER TABLE "User" ALTER COLUMN "id" TYPE VARCHAR(32)') && developer.includes("/^\\d{1,16}$/"), "Flexible 1-16 digit App IDs are incomplete");
+
+const picker = read("apps/mobile/src/components/PlaylistPicker.tsx"), notifications = read("apps/mobile/app/profile/notifications.tsx"), profile = read("apps/api/src/routes/profile.ts");
+assert.ok(picker.includes("/api/playlists?library=true") && picker.includes("item.canEdit"), "Collaborators cannot choose shared playlists when adding songs");
+assert.ok(!music.includes("listening_reward") && !music.includes("F4WE COIN earned"), "Listening rewards must not create user notifications");
+assert.ok(profile.includes('router.delete("/notifications"') && profile.includes('router.delete("/notifications/:id"') && notifications.includes("Delete all") && notifications.includes("trash-outline"), "Notification deletion is incomplete");
+assert.ok(profile.includes('/staff/requests/active-count') && read("apps/mobile/app/(tabs)/profile.tsx").includes("activeRequestCount"), "Active request count is missing from staff profiles");
+assert.ok(schema.includes("sessionVersion") && developer.includes('/users/:id/password') && owner.includes("Reset User Password"), "Owner password reset or session invalidation is incomplete");
+const share = read("apps/api/src/routes/share.ts");
+assert.ok(share.includes('property="og:title"') && share.includes("musicbox://playlist/") && share.includes("f4we.xyz") && playlistScreen.includes("Share playlist"), "Playlist rich preview or app deep link is incomplete");
 
 const appJson = JSON.parse(read("apps/mobile/app.json"));
 assert.equal(appJson.expo.version, "1.1.0");
@@ -82,4 +91,18 @@ assert.equal(nativeFirebasePackage, firebasePackage, "Native Firebase config is 
 assert.ok(read("apps/mobile/android/build.gradle").includes("com.google.gms:google-services"), "Google Services Gradle plugin is missing");
 assert.ok(read("apps/mobile/android/app/build.gradle").includes("apply plugin: 'com.google.gms.google-services'"), "Google Services app plugin is missing");
 
-console.log("PASS: cached playlists, canonical duplicates, release dates, reorder/collaboration, forced updates, maintenance, Firebase push, coins, charts, audio cuts and song info are wired.");
+const discordNative = read("apps/mobile/android/app/src/main/cpp/discord_presence.cpp");
+const discordModule = read("apps/mobile/android/app/src/main/java/com/musicbox/app/discord/DiscordPresenceModule.kt");
+const discordBridge = read("apps/mobile/src/lib/discordPresence.ts");
+assert.ok(
+  discordNative.includes("Discord_Client_UpdateRichPresence") &&
+  discordNative.includes("Discord_ActivityTypes_Playing") &&
+  discordNative.includes("Try F4WE") &&
+  discordNative.includes("https://f4we.xyz/"),
+  "Discord listening activity is incomplete"
+);
+assert.ok(discordModule.includes("1550247896803446874L") && discordBridge.includes("updateActivity"), "Discord Application ID or React Native bridge is missing");
+assert.ok(read("apps/mobile/src/context/PlayerContext.tsx").includes("updateDiscordActivity") && read("apps/mobile/src/playerService.ts").includes("PlaybackQueueEnded"), "Discord activity is not connected to foreground and background playback");
+assert.ok(fs.statSync(path.join(root, "apps/mobile/android/app/libs/discord_partner_sdk.aar")).size > 20_000_000, "Discord Android SDK is missing");
+
+console.log("PASS: playlists, collaboration, sharing, notifications, password reset, flexible IDs, rewards, updates, Firebase push, Discord activity, cuts and song info are wired.");

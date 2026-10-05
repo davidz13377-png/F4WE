@@ -15,6 +15,7 @@ COPY patches patches
 RUN npm ci --include=dev
 
 COPY apps/api apps/api
+COPY apps/mobile/assets/F4WE-icon.png apps/api/assets/F4WE-icon.png
 RUN npm --workspace @music-box/api run db:generate \
   && npm --workspace @music-box/api run build \
   && chown -R node:node /app

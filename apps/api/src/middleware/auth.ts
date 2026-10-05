@@ -4,10 +4,10 @@ import type { Rank } from "@prisma/client";
 import { env } from "../env.js";
 import { prisma } from "../db.js";
 
-type Token = { sub: string; rank: Rank };
+type Token = { sub: string; rank: Rank; ver?: number };
 
-export function signToken(userId: string, rank: Rank) {
-  return jwt.sign({ sub: userId, rank }, env.JWT_SECRET, { expiresIn: "7d", issuer: "music-box-api" });
+export function signToken(userId: string, rank: Rank, sessionVersion = 0) {
+  return jwt.sign({ sub: userId, rank, ver: sessionVersion }, env.JWT_SECRET, { expiresIn: "7d", issuer: "music-box-api" });
 }
 
 export async function authenticate(req: Request, res: Response, next: NextFunction) {
@@ -15,8 +15,9 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   if (!token) return res.status(401).json({ error: "Authentication required" });
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET, { issuer: "music-box-api" }) as Token;
-    const user = await prisma.user.findUnique({ where: { id: decoded.sub }, select: { id: true, rank: true, isOwner: true } });
+    const user = await prisma.user.findUnique({ where: { id: decoded.sub }, select: { id: true, rank: true, isOwner: true, sessionVersion: true } });
     if (!user) return res.status(401).json({ error: "Account no longer exists" });
+    if ((decoded.ver ?? 0) !== user.sessionVersion) return res.status(401).json({ error: "Session was invalidated. Please sign in again." });
     req.auth = { userId: user.id, rank: user.rank, isOwner: user.isOwner };
     next();
   } catch {

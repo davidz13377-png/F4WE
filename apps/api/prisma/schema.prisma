@@ -26,6 +26,7 @@ model User {
   id                      String               @id @db.VarChar(32)
   username                String               @unique @db.VarChar(32)
   passwordHash            String
+  sessionVersion          Int                  @default(0)
   rank                    Rank                 @default(Access)
   isOwner                 Boolean              @default(false)
   profilePicture          String?

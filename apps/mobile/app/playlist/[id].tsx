@@ -1,14 +1,14 @@
 import { useCallback, useRef, useState } from "react";
 import { Redirect, Stack, router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Image, Modal, Platform, Pressable, ScrollView, Share, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Button, Empty, Input, Screen, Title, ui } from "../../src/components/UI";
 import { SongRow } from "../../src/components/SongRow";
 import { useAuth } from "../../src/context/AuthContext";
 import { useLibrary } from "../../src/context/LibraryContext";
 import { usePlayer } from "../../src/context/PlayerContext";
-import { api, uploadFile } from "../../src/lib/api";
+import { API_URL, api, uploadFile } from "../../src/lib/api";
 import { F4WEAlert as Alert } from "../../src/components/F4WEAlert";
 import { profilePictureUrl } from "../../src/lib/media";
 import { colors } from "../../src/lib/theme";
@@ -75,14 +75,23 @@ export default function PlaylistScreen() {
   const saveOrder = async () => { if (!playlist || busy) return; setBusy(true); try { await api(`/api/playlists/${encodeURIComponent(id)}/order`, { method: "PUT", body: JSON.stringify({ musicIds: orderedSongs.map(song => song.id) }) }); setOrderOpen(false); await load(); } catch (e) { Alert.alert("Could not save song order", e instanceof Error ? e.message : "Try again"); } finally { setBusy(false); } };
   const addCollaborator = async () => { if (!collaboratorName.trim() || busy) return; setBusy(true); try { await api(`/api/playlists/${encodeURIComponent(id)}/collaborators`, { method: "POST", body: JSON.stringify({ username: collaboratorName.trim() }) }); setCollaboratorName(""); setCollaboratorOpen(false); await load(); } catch (e) { Alert.alert("Could not invite collaborator", e instanceof Error ? e.message : "Try again"); } finally { setBusy(false); } };
   const removeCollaborator = async (userId: string) => { setBusy(true); try { await api(`/api/playlists/${encodeURIComponent(id)}/collaborators/${encodeURIComponent(userId)}`, { method: "DELETE" }); await load(); } catch (e) { Alert.alert("Could not remove collaborator", e instanceof Error ? e.message : "Try again"); } finally { setBusy(false); } };
+  const sharePlaylist = async () => {
+    if (!playlist) return;
+    if (!playlist.isPublic) return Alert.alert("Private playlist", "Make this playlist public before sharing it outside F4WE.");
+    const url = `${API_URL.replace(/\/$/, "")}/share/playlist/${encodeURIComponent(playlist.id)}`;
+    try { await Share.share({ title: `${playlist.name} · F4WE`, message: `Listen to “${playlist.name}” on F4WE\n${url}`, url }); }
+    catch (e) { Alert.alert("Could not share playlist", e instanceof Error ? e.message : "Try again"); }
+  };
   return <Screen><Stack.Screen options={{ title: "Playlist" }} />
     {loading ? <ActivityIndicator color={colors.accent} /> : null}{error ? <Text style={{ color: colors.red }}>{error}</Text> : null}
     {playlist ? <><View style={{ alignItems: "center", marginBottom: 18 }}><Pressable disabled={!owned || busy} onPress={() => void changePicture()} accessibilityRole="button" accessibilityLabel={owned ? "Change playlist picture" : "Playlist picture"}>{playlist.artworkUrl ? <Image source={{ uri: profilePictureUrl(playlist.artworkUrl) }} style={{ width: 190, height: 190, borderRadius: 18 }} /> : <View style={{ width: 190, height: 190, borderRadius: 18, backgroundColor: colors.raised, alignItems: "center", justifyContent: "center" }}><Ionicons name="musical-notes" size={68} color={colors.accent} /></View>}{owned ? <View style={{ position: "absolute", right: 8, bottom: 8, backgroundColor: colors.accent, width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" }}>{busy ? <ActivityIndicator size="small" color={colors.accentText} /> : <Ionicons name="camera" size={19} color={colors.accentText} />}</View> : null}</Pressable>{owned && playlist.artworkUrl ? <Pressable onPress={removePicture} style={{ padding: 10 }}><Text style={{ color: colors.red }}>Remove picture</Text></Pressable> : null}</View><View style={[ui.row, { alignItems: "flex-start", gap: 8 }]}><View style={{ flex: 1 }}><Title subtitle={"Playlist • " + playlist.creator.username + " • " + playlist.songs.length + " songs • " + compactDuration(playlist.totalDuration)}>{playlist.name}</Title></View>{owned ? <Pressable onPress={() => { setPlaylistName(playlist.name); setNameOpen(true); }} style={{ padding: 10 }}><Ionicons name="pencil" size={22} color={colors.accent} /></Pressable> : null}</View>
       {playlist.description ? <Text style={[ui.body, { marginBottom: 16 }]}>{playlist.description}</Text> : null}
       {playlist.isStaffPlaylist ? <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, borderColor: colors.gold, borderWidth: 1, borderRadius: 99, paddingVertical: 5, paddingHorizontal: 10, marginBottom: 14 }}><Ionicons name="shield" size={13} color={colors.gold} /><Text style={{ color: colors.gold, fontWeight: "900", fontSize: 11 }}>STAFF ONLY • AUTO-SYNCED</Text></View> : !playlist.isPublic ? <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, borderColor: colors.softRed, borderWidth: 1, borderRadius: 99, paddingVertical: 5, paddingHorizontal: 10, marginBottom: 14 }}><Ionicons name="lock-closed" size={13} color={colors.softRed} /><Text style={{ color: colors.softRed, fontWeight: "900", fontSize: 11 }}>PRIVATE</Text></View> : null}
-      {owned ? <View style={{ marginBottom: 16 }}><VisibilityToggle value={playlist.isPublic} disabled={busy} onChange={value => void changeVisibility(value)} /><Text style={[ui.muted, { marginTop: 8 }]}>{playlist.isPublic ? "Visible to everyone in Search." : "Only you and Developers can open it."}</Text></View> : null}
+      {owned ? <View style={{ marginBottom: 16 }}><VisibilityToggle value={playlist.isPublic} disabled={busy} onChange={value => void changeVisibility(value)} /><Text style={[ui.muted, { marginTop: 8 }]}>{playlist.isPublic ? "Visible to everyone in Search." : "Only you, invited collaborators and Developers can open it."}</Text></View> : null}
       {playlist.songs.length ? <Button title="Play playlist" icon="play" onPress={() => void player.play(playlist.songs[0], playlist.songs, { queueControls: true })} /> : null}
       <View style={{ height: 12 }} />
+      <Button title="Share playlist" icon="share-social-outline" tone="dark" onPress={() => void sharePlaylist()} />
+      <View style={{ height: 8 }} />
       {editable && playlist.songs.length > 1 ? <><Button title="Arrange song order" icon="reorder-three" tone="dark" onPress={() => { setOrderedSongs([...playlist.songs]); setOrderOpen(true); }} /><View style={{ height: 8 }} /></> : null}
       {owned ? <><Button title={`Collaborators (${playlist.collaborators?.length ?? 0})`} icon="people-outline" tone="dark" onPress={() => setCollaboratorOpen(true)} /><View style={{ height: 8 }} /></> : null}
       {owned ? <Button title="Delete playlist" icon="trash-outline" tone="dark" loading={busy} onPress={deletePlaylist} /> : <Button title={playlist.saved ? "Remove from library" : "Add to library"} icon={playlist.saved ? "checkmark" : "add"} tone="dark" onPress={() => { void library.toggleSaved(playlist).then(load).catch(e => Alert.alert("Could not save playlist", e.message)); }} />}

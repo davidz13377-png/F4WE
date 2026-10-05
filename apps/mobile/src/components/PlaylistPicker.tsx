@@ -14,7 +14,7 @@ export function PlaylistPicker() {
   useEffect(() => {
     if (!selectedSong) return;
     let live = true; setName(""); setError(""); setLists([]); setLoading(true);
-    void api<Playlist[]>("/api/playlists?mine=true").then(items => { if (live) setLists(items); }).catch(e => { if (live) setError(e.message); }).finally(() => { if (live) setLoading(false); });
+    void api<Playlist[]>("/api/playlists?library=true").then(items => { if (live) setLists(items.filter(item => item.canEdit && !item.isStaffPlaylist)); }).catch(e => { if (live) setError(e.message); }).finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
   }, [selectedSong?.id]);
   const add = async (id: string) => {
@@ -40,7 +40,7 @@ export function PlaylistPicker() {
         <Text style={[ui.section, { marginTop: 0 }]}>Add to playlist</Text><Text style={[ui.muted, { marginBottom: 16 }]}>{selectedSong?.title}</Text>
         {loading ? <ActivityIndicator color={colors.accent} /> : null}{error ? <Text style={{ color: colors.red }}>{error}</Text> : null}
         <ScrollView keyboardShouldPersistTaps="handled">{lists.map(list => <Pressable key={list.id} disabled={busy} accessibilityRole="button" accessibilityLabel={`Add to ${list.name}`} onPress={() => void add(list.id)} style={{ paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colors.border }}><Text style={ui.body}>{list.name}</Text><Text style={ui.muted}>Playlist • {list.trackCount} songs</Text></Pressable>)}
-          {!loading && !lists.length ? <Empty label="Create your first playlist below" /> : null}
+          {!loading && !lists.length ? <Empty label="Create a playlist below, or ask a friend to invite you as a collaborator" /> : null}
         </ScrollView>
         <Input value={name} maxLength={100} onChangeText={setName} placeholder="New playlist name" style={{ marginTop: 16 }} />
         <Button title="Create playlist & add song" loading={busy} onPress={() => void create()} />

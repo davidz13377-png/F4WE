@@ -6,6 +6,7 @@ import type { ListeningFollower, ListeningPresence, Song } from "../types";
 import { useLibrary } from "./LibraryContext";
 import { useAuth } from "./AuthContext";
 import { F4WEAlert as Alert } from "../components/F4WEAlert";
+import { clearDiscordActivity, updateDiscordActivity } from "../lib/discordPresence";
 
 let ready: Promise<void> | null = null;
 function setup() {
@@ -125,6 +126,18 @@ export function PlayerProvider({ children }: PropsWithChildren) {
     durationSent.current.add(musicId);
     void api(`/api/music/${encodeURIComponent(musicId)}/duration`, { method: "PATCH", body: JSON.stringify({ duration: measured }) }).catch(() => durationSent.current.delete(musicId));
   }, [active?.id, active?.duration, progress.duration]);
+
+  useEffect(() => {
+    if (!active || playback.state !== State.Playing) {
+      void clearDiscordActivity().catch(() => undefined);
+      return;
+    }
+    void updateDiscordActivity(
+      active,
+      progress.position,
+      progress.duration || active.duration || 0
+    ).catch(() => undefined);
+  }, [active?.id, active?.title, active?.artist, playback.state]);
 
   useEffect(() => {
     if (!socket || previewMode.current || !active || typeof active.id !== "string") return;
@@ -268,7 +281,14 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const updateSongMetadata = (song: Song) => run(async () => {
     const queue = await TrackPlayer.getQueue();
     for (let index = 0; index < queue.length; index++) if (queue[index].id === song.id) await TrackPlayer.updateMetadataForTrack(index, { title: song.title, artist: song.artist || "Unknown artist", artwork: song.artworkUrl || undefined });
-    if (String(activeRef.current?.id) === song.id) await updateNotification({ ...activeRef.current!, title: song.title, artist: song.artist || "Unknown artist", artwork: song.artworkUrl || undefined });
+    if (String(activeRef.current?.id) === song.id) {
+      const updatedTrack = { ...activeRef.current!, title: song.title, artist: song.artist || "Unknown artist", artwork: song.artworkUrl || undefined };
+      await updateNotification(updatedTrack);
+      if ((await TrackPlayer.getPlaybackState()).state === State.Playing) {
+        const current = await TrackPlayer.getProgress();
+        await updateDiscordActivity(updatedTrack, current.position, current.duration || updatedTrack.duration || 0).catch(() => undefined);
+      }
+    }
     originalQueue.current = originalQueue.current.map(item => item.id === song.id ? song : item);
     setEditedMetadata(previous => ({ ...previous, [song.id]: { title: song.title, artist: song.artist || "Unknown artist" } }));
   });

@@ -26,10 +26,10 @@ router.get("/staff-team", asyncRoute(async (_req, res) => {
 }));
 
 router.get("/me", asyncRoute(async (req, res) => {
-  const user = await prisma.user.findUnique({ where: { id: req.auth!.userId }, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, bannerUrl: true, coins: true, animatedProfileUnlocked: true, animatedBannerUnlocked: true, activeProfileDesign: { select: { assetUrl: true } }, registrationDate: true, shareListening: true } });
+  const user = await prisma.user.findUnique({ where: { id: req.auth!.userId }, select: { id: true, username: true, rank: true, isOwner: true, profilePicture: true, bannerUrl: true, coins: true, animatedProfileUnlocked: true, animatedBannerUnlocked: true, activeProfileDesign: { select: { assetUrl: true } }, registrationDate: true, shareListening: true, sessionVersion: true } });
   if (!user) return res.status(404).json({ error: "User not found" });
-  const { activeProfileDesign, ...details } = user;
-  res.json({ user: { ...details, profileDesignUrl: activeProfileDesign?.assetUrl ?? null }, refreshedToken: signToken(user.id, user.rank) });
+  const { activeProfileDesign, sessionVersion, ...details } = user;
+  res.json({ user: { ...details, profileDesignUrl: activeProfileDesign?.assetUrl ?? null }, refreshedToken: signToken(user.id, user.rank, sessionVersion) });
 }));
 
 router.get("/users/:id", asyncRoute(async (req, res) => {
@@ -251,6 +251,22 @@ router.post("/notifications/read", asyncRoute(async (req, res) => {
   const { ids } = z.object({ ids: z.array(z.string()).max(100) }).parse(req.body);
   await prisma.notification.updateMany({ where: { userId: req.auth!.userId, id: { in: ids } }, data: { read: true } });
   res.status(204).end();
+}));
+
+router.delete("/notifications", asyncRoute(async (req, res) => {
+  await prisma.notification.deleteMany({ where: { userId: req.auth!.userId } });
+  res.status(204).end();
+}));
+
+router.delete("/notifications/:id", asyncRoute(async (req, res) => {
+  const deleted = await prisma.notification.deleteMany({ where: { id: req.params.id as string, userId: req.auth!.userId } });
+  if (!deleted.count) return res.status(404).json({ error: "Notification not found" });
+  res.status(204).end();
+}));
+
+router.get("/staff/requests/active-count", requireRank(Rank.Admin, Rank.Developer), asyncRoute(async (_req, res) => {
+  const count = await prisma.musicRequest.count({ where: { status: { in: ["Pending", "Processing"] } } });
+  res.json({ count });
 }));
 
 router.get("/staff/requests", requireRank(Rank.Admin, Rank.Developer), asyncRoute(async (_req, res) => {

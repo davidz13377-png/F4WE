@@ -103,7 +103,7 @@ router.post("/designs/:id/purchase", asyncRoute(async (req, res) => {
 
 router.post("/transfer", asyncRoute(async (req, res) => {
   const senderId = req.auth!.userId;
-  const { friendId, amount } = z.object({ friendId: z.string().regex(/^\d{4,32}$/, "App ID must contain 4 to 32 digits"), amount: z.number().int().min(1).max(1_000_000) }).strict().parse(req.body);
+  const { friendId, amount } = z.object({ friendId: z.string().regex(/^\d{1,16}$/, "App ID must contain 1 to 16 digits"), amount: z.number().int().min(1).max(1_000_000) }).strict().parse(req.body);
   if (friendId === senderId) return res.status(400).json({ error: "You cannot transfer coins to yourself" });
   const result = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "User" WHERE id IN (${senderId}, ${friendId}) ORDER BY id FOR UPDATE`;
@@ -143,7 +143,7 @@ router.delete("/designs/active", asyncRoute(async (req, res) => {
 }));
 
 router.post("/owner/coins", ownerOnly, asyncRoute(async (req, res) => {
-  const { userId, amount } = z.object({ userId: z.string().regex(/^\d{4,32}$/, "App ID must contain 4 to 32 digits"), amount: z.number().int().min(-10_000_000).max(10_000_000).refine(value => value !== 0) }).strict().parse(req.body);
+  const { userId, amount } = z.object({ userId: z.string().regex(/^\d{1,16}$/, "App ID must contain 1 to 16 digits"), amount: z.number().int().min(-10_000_000).max(10_000_000).refine(value => value !== 0) }).strict().parse(req.body);
   const updated = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
     const current = await tx.user.findUnique({ where: { id: userId }, select: { coins: true } });

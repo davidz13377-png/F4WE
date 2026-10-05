@@ -1,4 +1,5 @@
 import { Router } from "express";
+import bcrypt from "bcryptjs";
 import { Rank } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db.js";
@@ -33,7 +34,7 @@ router.get("/staff-stats", asyncRoute(async (req, res) => {
 
 router.patch("/users/:id/app-id", asyncRoute(async (req, res) => {
   if (!req.auth!.isOwner) return res.status(403).json({ error: "Owner access required" });
-  const appId = z.string().regex(/^\d{4,32}$/, "App ID must contain 4 to 32 digits");
+  const appId = z.string().regex(/^\d{1,16}$/, "App ID must contain 1 to 16 digits");
   const oldId = appId.parse(req.params.id);
   const { newId } = z.object({ newId: appId }).strict().parse(req.body);
   if (oldId === newId) return res.status(400).json({ error: "The new App ID is unchanged" });
@@ -47,6 +48,19 @@ router.patch("/users/:id/app-id", asyncRoute(async (req, res) => {
   await audit("DEBUG", newId, "user.app_id_changed", { oldId, newId, username: current.username, changedBy: req.auth!.userId });
   notifyUser(oldId, "sessionInvalidated", { reason: "app_id_changed" });
   res.json({ oldId, newId, username: current.username, changedCurrentAccount: oldId === req.auth!.userId });
+}));
+
+router.patch("/users/:id/password", asyncRoute(async (req, res) => {
+  if (!req.auth!.isOwner) return res.status(403).json({ error: "Owner access required" });
+  const userId = z.string().regex(/^\d{1,16}$/, "App ID must contain 1 to 16 digits").parse(req.params.id);
+  const { password } = z.object({ password: z.string().min(8).max(128) }).strict().parse(req.body);
+  const current = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, username: true } });
+  if (!current) return res.status(404).json({ error: "User not found" });
+  const passwordHash = await bcrypt.hash(password, 12);
+  await prisma.user.update({ where: { id: userId }, data: { passwordHash, sessionVersion: { increment: 1 } } });
+  await audit("DEBUG", userId, "user.password_reset", { changedBy: req.auth!.userId });
+  notifyUser(userId, "sessionInvalidated", { reason: "password_changed" });
+  res.json({ id: userId, username: current.username, sessionsInvalidated: true });
 }));
 
 router.patch("/users/:id/rank", asyncRoute(async (req, res) => {
