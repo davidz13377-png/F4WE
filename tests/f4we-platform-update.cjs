@@ -74,8 +74,9 @@ const share = read("apps/api/src/routes/share.ts");
 assert.ok(share.includes('property="og:title"') && share.includes("musicbox://playlist/") && share.includes("f4we.xyz") && playlistScreen.includes("Share playlist"), "Playlist rich preview or app deep link is incomplete");
 
 const appJson = JSON.parse(read("apps/mobile/app.json"));
-assert.equal(appJson.expo.version, "1.1.0");
-assert.equal(appJson.expo.android.versionCode, 2);
+assert.equal(appJson.expo.version, "1.2.0");
+assert.equal(appJson.expo.android.versionCode, 3);
+assert.ok(read("apps/mobile/android/app/build.gradle").includes('versionName "1.2.0"') && read("apps/mobile/android/app/build.gradle").includes("versionCode 3"), "Native Android version does not match app.json");
 assert.equal(appJson.expo.android.googleServicesFile, "./google-services.json");
 assert.ok(appJson.expo.plugins.some(plugin => Array.isArray(plugin) && plugin[0] === "expo-notifications"));
 const notificationPlugin = appJson.expo.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === "expo-notifications");
