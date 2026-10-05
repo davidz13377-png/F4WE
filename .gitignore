@@ -51,6 +51,7 @@ tools/
 
 # Korábbi szöveges kódmásolatok
 *.txt
+!**/CMakeLists.txt
 
 # Android aláíró kulcsok
 *.keystore
