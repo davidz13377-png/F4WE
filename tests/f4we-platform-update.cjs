@@ -93,7 +93,8 @@ assert.ok(read("apps/mobile/android/build.gradle").includes("com.google.gms:goog
 assert.ok(read("apps/mobile/android/app/build.gradle").includes("apply plugin: 'com.google.gms.google-services'"), "Google Services app plugin is missing");
 
 const discordNative = read("apps/mobile/android/app/src/main/cpp/discord_presence.cpp");
-const discordCmake = read("apps/mobile/android/app/src/main/cpp/CMakeLists.txt");
+const discordCmake = read("apps/mobile/android/app/src/main/jni/CMakeLists.txt");
+const androidBuild = read("apps/mobile/android/app/build.gradle");
 const discordModule = read("apps/mobile/android/app/src/main/java/com/musicbox/app/discord/DiscordPresenceModule.kt");
 const discordBridge = read("apps/mobile/src/lib/discordPresence.ts");
 assert.ok(
@@ -111,7 +112,13 @@ assert.ok(
   "Discord native module is not compatible with React Native 0.86"
 );
 assert.ok(read("apps/mobile/src/context/PlayerContext.tsx").includes("updateDiscordActivity") && read("apps/mobile/src/playerService.ts").includes("PlaybackQueueEnded"), "Discord activity is not connected to foreground and background playback");
-assert.ok(discordCmake.includes("discord_partner_sdk::discord_partner_sdk") && discordCmake.includes("discord_presence.cpp"), "Discord native CMake configuration is missing");
+assert.ok(
+  androidBuild.includes('path file("src/main/jni/CMakeLists.txt")') &&
+  discordCmake.includes("ReactNative-application.cmake") &&
+  discordCmake.includes("discord_partner_sdk::discord_partner_sdk") &&
+  discordCmake.includes("discord_presence.cpp"),
+  "React Native or Discord native CMake configuration is missing"
+);
 assert.ok(fs.statSync(path.join(root, "apps/mobile/android/app/libs/discord_partner_sdk.aar")).size > 20_000_000, "Discord Android SDK is missing");
 
 console.log("PASS: playlists, collaboration, sharing, notifications, password reset, flexible IDs, rewards, updates, Firebase push, Discord activity, cuts and song info are wired.");
