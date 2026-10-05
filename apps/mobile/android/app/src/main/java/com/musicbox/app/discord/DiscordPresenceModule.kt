@@ -21,9 +21,9 @@ class DiscordPresenceModule(
 
   override fun getName(): String = "DiscordPresence"
 
-  private fun initialize(): Boolean {
+  private fun ensureInitialized(): Boolean {
     if (initialized) return true
-    val activity = currentActivity ?: return false
+    val activity = reactApplicationContext.currentActivity ?: return false
     DiscordSocialSdkInit.setEngineActivity(activity)
     initialized = nativeInitialize(APPLICATION_ID)
     return initialized
@@ -38,7 +38,7 @@ class DiscordPresenceModule(
     promise: Promise
   ) {
     try {
-      if (!initialize()) {
+      if (!ensureInitialized()) {
         promise.resolve(false)
         return
       }

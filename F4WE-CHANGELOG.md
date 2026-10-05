@@ -34,6 +34,7 @@ Ettől a verziótól minden kiadás változásai ebbe a fájlba kerülnek. Az al
 
 - Added native Discord Social SDK integration for Android.
 - Fixed native Android packaging so the Discord CMake configuration is always included in update ZIPs and Git commits.
+- Fixed the Discord Android bridge for React Native 0.86 Kotlin compilation.
 - Added Firebase/Expo push registration and server-side push delivery.
 - Added playlist Open Graph previews and Android deep-link fallback.
 - Added database session versioning for secure password resets.
