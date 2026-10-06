@@ -346,8 +346,8 @@ async function main() {
   console.log("PASS: mobile obtains a signed URL, uploads bytes straight to R2, then completes through the authenticated API.");
   let permission = true, oversized = false, uploads = 0, refreshed = 0, permissionCalls = 0; const alerts = [], platform = { OS: "android" };
   const profile = load("apps/mobile/app/(tabs)/profile.tsx", {
-    react: { useState: value => [value, () => {}], useRef: value => ({ current: value }), useEffect: () => {} }, "react/jsx-runtime": { jsx, jsxs: jsx },
-    "@expo/vector-icons": { Ionicons: "Icon" }, "expo-clipboard": { setStringAsync: async () => {} }, "expo-router": { router: {} },
+    react: { useState: value => [value, () => {}], useRef: value => ({ current: value }), useEffect: () => {}, useCallback: callback => callback }, "react/jsx-runtime": { jsx, jsxs: jsx },
+    "@expo/vector-icons": { Ionicons: "Icon" }, "expo-clipboard": { setStringAsync: async () => {} }, "expo-router": { router: {}, useFocusEffect: () => {} },
     "expo-image-picker": { requestMediaLibraryPermissionsAsync: async () => { permissionCalls++; return { granted: permission }; }, launchImageLibraryAsync: async () => ({ canceled: false, assets: [{ uri: "file:///cache/avatar.png", fileName: "avatar.png", mimeType: "image/png", fileSize: oversized ? 6 * 1024 * 1024 : 3 }] }) },
     "react-native": { Platform: platform, ActivityIndicator: "Spinner", Alert: { alert: (...args) => alerts.push(args) }, Modal: "Modal", Pressable: "Pressable", Text: "Text", View: "View", StyleSheet: { create: s => s, absoluteFill: {} } }, "expo-image": { Image: "Image" },
     "../../src/components/F4WEAlert": { F4WEAlert: { alert: (...args) => alerts.push(args) } },

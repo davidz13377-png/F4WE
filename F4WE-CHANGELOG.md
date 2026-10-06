@@ -21,6 +21,8 @@ Ettől a verziótól minden kiadás változásai ebbe a fájlba kerülnek. Az al
 - Profile decorations remain owned after removal from the shop and can be unequipped.
 - Updated F4WE application icon and notification appearance.
 - Fixed music playback being blocked by the required-update check.
+- Fixed manual music uploads failing during duplicate checking.
+- Improved Discord MP3 detection for valid files with uncommon metadata or headers.
 
 ### Staff and owner tools
 
@@ -42,6 +44,8 @@ Ettől a verziótól minden kiadás változásai ebbe a fájlba kerülnek. Az al
 - Added database session versioning for secure password resets.
 - Native TrackPlayer stream requests now include the F4WE app-version header, preventing HTTP 426 responses.
 - The API keeps authentication and maintenance protection on media streams while allowing existing 1.2.0 builds that lack the native version header.
+- Replaced the PostgreSQL-incompatible NUL-separated duplicate lock with two safe advisory-lock keys.
+- Discord uploads now validate real MPEG frame sequences and retry through Discord's proxy URL when needed.
 - App version: `1.2.0`
 - Android version code: `3`
 

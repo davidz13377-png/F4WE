@@ -9,6 +9,60 @@ const s3 = env.STORAGE_DRIVER === "r2" ? new S3Client({
   region: "auto", endpoint: env.R2_ENDPOINT!, credentials: { accessKeyId: env.R2_ACCESS_KEY_ID!, secretAccessKey: env.R2_SECRET_ACCESS_KEY! }
 }) : null;
 
+const MPEG1_BITRATES: Record<number, readonly number[]> = {
+  3: [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
+  2: [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
+  1: [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320]
+};
+const MPEG2_BITRATES: Record<number, readonly number[]> = {
+  3: [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256],
+  2: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+  1: [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160]
+};
+
+function mpegFrameLength(buffer: Buffer, offset: number) {
+  const first = buffer[offset], second = buffer[offset + 1], third = buffer[offset + 2];
+  if (first !== 0xff || second === undefined || third === undefined || (second & 0xe0) !== 0xe0) return null;
+  const version = (second >> 3) & 0x03;
+  const layer = (second >> 1) & 0x03;
+  const bitrateIndex = (third >> 4) & 0x0f;
+  const sampleRateIndex = (third >> 2) & 0x03;
+  if (version === 1 || layer === 0 || bitrateIndex === 0 || bitrateIndex === 15 || sampleRateIndex === 3) return null;
+  const bitrate = (version === 3 ? MPEG1_BITRATES : MPEG2_BITRATES)[layer]?.[bitrateIndex];
+  const baseSampleRate = [44_100, 48_000, 32_000][sampleRateIndex];
+  if (!bitrate || !baseSampleRate) return null;
+  const sampleRate = version === 3 ? baseSampleRate : version === 2 ? baseSampleRate / 2 : baseSampleRate / 4;
+  const padding = (third >> 1) & 1;
+  if (layer === 3) return Math.floor((12 * bitrate * 1000) / sampleRate + padding) * 4;
+  const coefficient = layer === 1 && version !== 3 ? 72 : 144;
+  return Math.floor((coefficient * bitrate * 1000) / sampleRate) + padding;
+}
+
+/** Recognizes valid MP3 frame sequences that file-type may miss after unusual ID3 metadata. */
+export function hasMpegAudioFrames(buffer: Buffer) {
+  if (buffer.length < 8) return false;
+  let start = 0;
+  if (buffer.subarray(0, 3).toString("ascii") === "ID3" && buffer.length >= 10) {
+    const b6 = buffer[6]!, b7 = buffer[7]!, b8 = buffer[8]!, b9 = buffer[9]!;
+    const tagSize = ((b6 & 0x7f) << 21) | ((b7 & 0x7f) << 14) | ((b8 & 0x7f) << 7) | (b9 & 0x7f);
+    const afterTag = 10 + tagSize + ((buffer[5]! & 0x10) !== 0 ? 10 : 0);
+    if (afterTag < buffer.length - 4) start = afterTag;
+  }
+  const end = Math.min(buffer.length - 4, start + 2 * 1024 * 1024);
+  for (let offset = start; offset <= end; offset++) {
+    const firstLength = mpegFrameLength(buffer, offset);
+    if (!firstLength) continue;
+    const nextOffset = offset + firstLength;
+    if (nextOffset + 4 <= buffer.length && mpegFrameLength(buffer, nextOffset)) return true;
+  }
+  return false;
+}
+
+async function isValidMp3(buffer: Buffer) {
+  const detected = await fileTypeFromBuffer(buffer).catch(() => undefined);
+  return detected?.mime === "audio/mpeg" || hasMpegAudioFrames(buffer);
+}
+
 export async function downloadDiscordMp3(attachment: Attachment) {
   if (!s3) throw new Error("Discord music upload requires STORAGE_DRIVER=r2.");
   const maxBytes = Math.floor(env.MAX_MP3_MB * 1024 * 1024);
@@ -16,12 +70,17 @@ export async function downloadDiscordMp3(attachment: Attachment) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90_000);
   try {
-    const response = await fetch(attachment.url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`A Discord nem tudta átadni az MP3-at (HTTP ${response.status}).`);
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (!buffer.length || buffer.length > maxBytes) throw new Error(`Az MP3 legfeljebb ${env.MAX_MP3_MB} MB lehet.`);
-    if ((await fileTypeFromBuffer(buffer))?.mime !== "audio/mpeg") throw new Error("A csatolmány tartalma nem érvényes MP3.");
-    return buffer;
+    const urls = [...new Set([attachment.url, attachment.proxyURL].filter(Boolean))];
+    let lastHttpStatus: number | null = null;
+    for (const url of urls) {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) { lastHttpStatus = response.status; continue; }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (!buffer.length || buffer.length > maxBytes) throw new Error(`Az MP3 legfeljebb ${env.MAX_MP3_MB} MB lehet.`);
+      if (await isValidMp3(buffer)) return buffer;
+    }
+    if (lastHttpStatus !== null && urls.length === 1) throw new Error(`A Discord nem tudta átadni az MP3-at (HTTP ${lastHttpStatus}).`);
+    throw new Error("A csatolmány tartalma nem érvényes MP3. Ellenőrizd, hogy valódi MP3-fájl, ne csak .mp3-ra átnevezett más formátum legyen.");
   } finally { clearTimeout(timeout); }
 }
 

@@ -26,7 +26,7 @@ assert.ok(mini.includes("layout.y + layout.height / 2 - lyricsViewport / 2") && 
 
 const bot = read("apps/bot/src/index.ts"), botUpload = read("apps/bot/src/musicUpload.ts");
 assert.ok(bot.includes('setName("addmusic")') && bot.includes('setName("removeowner")') && bot.includes('OWNER_DISCORD_ID = "1141698223141048463"'), "Discord music/owner commands are incomplete");
-assert.ok(botUpload.includes("fileTypeFromBuffer") && botUpload.includes("r2://") && botUpload.includes("addToStaffPlaylist"), "Discord MP3 validation/R2 upload is incomplete");
+assert.ok(botUpload.includes("fileTypeFromBuffer") && botUpload.includes("hasMpegAudioFrames") && botUpload.includes("attachment.proxyURL") && botUpload.includes("r2://") && botUpload.includes("addToStaffPlaylist"), "Discord MP3 validation/R2 upload is incomplete");
 
 const mobileProfile = read("apps/mobile/app/(tabs)/profile.tsx"), mobileShop = read("apps/mobile/app/profile/shop.tsx"), owner = read("apps/mobile/app/profile/owner.tsx");
 assert.ok(mobileProfile.includes("F4WE COINS") && mobileProfile.includes("Change username") && mobileProfile.includes("bannerUrl"), "Profile banner, balance, or rename UI is missing");

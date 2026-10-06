@@ -235,7 +235,7 @@ router.post("/upload/complete", requireRank(Rank.Moderator, Rank.Admin, Rank.Dev
     song = await prisma.$transaction(async tx => {
       const identity = musicIdentity(input.title, input.artist);
       if (!input.confirmDuplicate) {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${identity.normalizedTitle + "\u0000" + identity.normalizedArtist}))`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${identity.normalizedTitle}), hashtext(${identity.normalizedArtist}))`;
         if (await tx.music.findFirst({ where: identity, select: { id: true } })) throw Object.assign(new Error("A song with this title and artist already exists"), { status: 409 });
       }
       const created = await tx.music.create({ data: { title: input.title, artist: input.artist, ...identity, artworkUrl: input.artworkUrl, releaseDate: releaseDateValue(input.releaseDate), filePath: uploaded.reference, mimeType: uploaded.mimeType, duration: uploaded.duration, uploaderId: req.auth!.userId } });
@@ -263,7 +263,7 @@ router.post("/upload", requireRank(Rank.Moderator, Rank.Admin, Rank.Developer), 
     song = await prisma.$transaction(async tx => {
       const identity = musicIdentity(meta.title, meta.artist);
       if (!meta.confirmDuplicate) {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${identity.normalizedTitle + "\u0000" + identity.normalizedArtist}))`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${identity.normalizedTitle}), hashtext(${identity.normalizedArtist}))`;
         if (await tx.music.findFirst({ where: identity, select: { id: true } })) throw Object.assign(new Error("A song with this title and artist already exists"), { status: 409 });
       }
       const created = await tx.music.create({ data: { title: meta.title, artist: meta.artist, ...identity, artworkUrl: meta.artworkUrl, releaseDate: releaseDateValue(meta.releaseDate), filePath, duration: mp3DurationSeconds(req.file!.buffer), uploaderId: req.auth!.userId } });

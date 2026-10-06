@@ -38,6 +38,11 @@ const music = read("apps/api/src/routes/music.ts");
 for (const contract of ['router.get("/:id/info"', 'router.post("/:id/cut"', "pg_advisory_xact_lock", "releaseDateInput"]) {
   assert.ok(music.includes(contract), `Missing music contract: ${contract}`);
 }
+assert.ok(
+  !music.includes("\\u0000") &&
+  (music.match(/pg_advisory_xact_lock\(hashtext\(\$\{identity\.normalizedTitle\}\), hashtext\(\$\{identity\.normalizedArtist\}\)\)/g) || []).length === 2,
+  "Duplicate-upload advisory locks must use PostgreSQL-safe text keys"
+);
 const storage = read("apps/api/src/services/storage.ts"), cutSelector = read("apps/mobile/src/components/CutRangeSelector.tsx"), manager = read("apps/mobile/app/profile/music-manager.tsx");
 assert.ok(storage.includes('spawn("ffprobe"') && storage.includes('"-t", String(requestedDuration)') && !storage.includes('"-to", String(endSeconds)'), "Audio cutting must use accurate duration-based FFmpeg output and FFprobe validation");
 assert.ok(cutSelector.includes("PanResponder") && cutSelector.includes("Play selected range") && manager.includes("<CutRangeSelector"), "The mobile two-handle cut preview is incomplete");
