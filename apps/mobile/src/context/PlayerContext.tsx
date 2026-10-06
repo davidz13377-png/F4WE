@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type PropsWithChildren } from "react";
 import { AppState, Platform } from "react-native";
 import TrackPlayer, { AndroidAudioContentType, AppKilledPlaybackBehavior, Capability, Event, RepeatMode, State, useActiveTrack, usePlaybackState, useProgress, useTrackPlayerEvents, type Track } from "react-native-track-player";
-import { API_URL, api, currentToken } from "../lib/api";
+import { API_URL, APP_VERSION, api, currentToken } from "../lib/api";
 import type { ListeningFollower, ListeningPresence, Song } from "../types";
 import { useLibrary } from "./LibraryContext";
 import { useAuth } from "./AuthContext";
@@ -40,7 +40,11 @@ function streamTrack(song: Song, token: string): Track {
     title: song.title, artist: song.artist || "Unknown artist", album: "F4WE", description: "F4WE", genre: "F4WE",
     artwork: song.artworkUrl || undefined,
     ...(song.duration && song.duration > 0 ? { duration: song.duration } : {}),
-    contentType: "audio/mpeg", headers: { Authorization: `Bearer ${token}` }
+    contentType: "audio/mpeg",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-F4WE-Version": APP_VERSION
+    }
   };
 }
 

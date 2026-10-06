@@ -20,6 +20,7 @@ Ettől a verziótól minden kiadás változásai ebbe a fájlba kerülnek. Az al
 - Duplicate song detection has been improved.
 - Profile decorations remain owned after removal from the shop and can be unequipped.
 - Updated F4WE application icon and notification appearance.
+- Fixed music playback being blocked by the required-update check.
 
 ### Staff and owner tools
 
@@ -39,6 +40,8 @@ Ettől a verziótól minden kiadás változásai ebbe a fájlba kerülnek. Az al
 - Added Firebase/Expo push registration and server-side push delivery.
 - Added playlist Open Graph previews and Android deep-link fallback.
 - Added database session versioning for secure password resets.
+- Native TrackPlayer stream requests now include the F4WE app-version header, preventing HTTP 426 responses.
+- The API keeps authentication and maintenance protection on media streams while allowing existing 1.2.0 builds that lack the native version header.
 - App version: `1.2.0`
 - Android version code: `3`
 

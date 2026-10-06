@@ -53,6 +53,16 @@ const system = read("apps/api/src/routes/system.ts"), gate = read("apps/mobile/s
 assert.ok(system.includes("announceUpdate") && system.includes("maintenanceEnabled") && system.includes("createBroadcastNotification"), "Owner update/maintenance controls are incomplete");
 assert.ok(gate.includes("onRequestClose={() => undefined}") && gate.includes("https://f4we.xyz") === false && gate.includes("Linking.openURL"), "Blocking update gate is incomplete");
 assert.ok(guard.includes("APP_UPDATE_REQUIRED") && guard.includes("MAINTENANCE"), "Server-side update/maintenance enforcement is incomplete");
+assert.ok(
+  guard.includes("nativeMediaStream") && guard.includes("!nativeMediaStream && olderThan"),
+  "Version-less native media requests must bypass only the update-version check"
+);
+const playerContext = read("apps/mobile/src/context/PlayerContext.tsx");
+assert.ok(
+  playerContext.includes('import { API_URL, APP_VERSION, api, currentToken }') &&
+  playerContext.includes('"X-F4WE-Version": APP_VERSION'),
+  "Native music stream requests must include the app version or the update guard returns HTTP 426"
+);
 
 const notificationService = read("apps/api/src/services/notifications.ts"), pushClient = read("apps/mobile/src/components/PushRegistration.tsx");
 assert.ok(notificationService.includes("https://exp.host/--/api/v2/push/send") && pushClient.includes("requestPermissionsAsync") && pushClient.includes("getExpoPushTokenAsync"), "Push notifications are incomplete");

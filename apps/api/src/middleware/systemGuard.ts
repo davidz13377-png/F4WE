@@ -29,9 +29,15 @@ async function settings() {
 export async function systemGuard(req: Request, res: Response, next: NextFunction) {
   try {
     const value = await settings();
+    // TrackPlayer performs media requests outside the normal API client. Older
+    // 1.2.0 builds therefore have no version header on this one endpoint. The
+    // rest of the app is still guarded, while authentication and maintenance
+    // checks continue to apply to the stream request below.
+    const nativeMediaStream = (req.method === "GET" || req.method === "HEAD")
+      && /^\/api\/music\/[^/?]+\/stream(?:\?.*)?$/.test(req.originalUrl);
     // Builds released before version headers existed are the original 1.0.0 APK.
     const version = String(req.headers["x-f4we-version"] || "1.0.0");
-    if (olderThan(version, value.minimumVersion)) return res.status(426).json({ error: value.updateMessage, code: "APP_UPDATE_REQUIRED", minimumVersion: value.minimumVersion, downloadUrl: "https://f4we.xyz/" });
+    if (!nativeMediaStream && olderThan(version, value.minimumVersion)) return res.status(426).json({ error: value.updateMessage, code: "APP_UPDATE_REQUIRED", minimumVersion: value.minimumVersion, downloadUrl: "https://f4we.xyz/" });
     if (value.maintenanceEnabled) {
       // Keep login reachable so an Owner can authenticate and turn maintenance off.
       if (req.method === "POST" && req.path === "/auth/login") return next();
