@@ -39,6 +39,7 @@ dist/
 **/dist/
 build/
 **/build/
+desktop-windows/release/
 
 # Logok és ideiglenes fájlok
 *.log

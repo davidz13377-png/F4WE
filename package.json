@@ -12,6 +12,8 @@
     "dev:api": "npm --workspace @music-box/api run dev",
     "dev:bot": "npm --workspace @music-box/bot run dev",
     "dev:mobile": "npm --workspace @music-box/mobile run start",
+    "dev:windows": "npm --prefix desktop-windows run dev",
+    "build:windows": "npm --prefix desktop-windows run dist",
     "db:generate": "npm --workspace @music-box/api run db:generate",
     "db:migrate": "npm --workspace @music-box/api run db:migrate",
     "db:deploy": "npm --workspace @music-box/api run db:deploy",

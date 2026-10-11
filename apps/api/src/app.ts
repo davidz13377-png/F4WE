@@ -14,6 +14,7 @@ import friendRoutes from "./routes/friends.js";
 import shopRoutes from "./routes/shop.js";
 import systemRoutes from "./routes/system.js";
 import shareRoutes from "./routes/share.js";
+import artistRoutes from "./routes/artists.js";
 import { env } from "./env.js";
 import { asyncRoute, errorHandler } from "./middleware/errors.js";
 import { openImage, usingR2Storage } from "./services/storage.js";
@@ -30,7 +31,7 @@ app.use("/share", shareRoutes);
 if (usingR2Storage) {
   app.get("/media/:category/:filename", asyncRoute(async (req, res) => {
     const category = req.params.category;
-    if (category !== "profile" && category !== "banner" && category !== "profile-design" && category !== "playlist" && category !== "music-artwork") return res.status(404).json({ error: "Image not found" });
+    if (category !== "profile" && category !== "banner" && category !== "profile-design" && category !== "playlist" && category !== "music-artwork" && category !== "artist" && category !== "release-artwork") return res.status(404).json({ error: "Image not found" });
     const image = await openImage(category, req.params.filename as string);
     if (!image) return res.status(404).json({ error: "Image not found" });
     res.setHeader("Content-Type", image.contentType);
@@ -44,6 +45,8 @@ if (usingR2Storage) {
   app.use("/media/profile-design", express.static(path.resolve(env.UPLOAD_DIR, "profile-design"), { fallthrough: false, maxAge: "1d", immutable: true }));
   app.use("/media/playlist", express.static(path.resolve(env.UPLOAD_DIR, "playlist"), { fallthrough: false, maxAge: "1d", immutable: true }));
   app.use("/media/music-artwork", express.static(path.resolve(env.UPLOAD_DIR, "music-artwork"), { fallthrough: false, maxAge: "1d", immutable: true }));
+  app.use("/media/artist", express.static(path.resolve(env.UPLOAD_DIR, "artist"), { fallthrough: false, maxAge: "1d", immutable: true }));
+  app.use("/media/release-artwork", express.static(path.resolve(env.UPLOAD_DIR, "release-artwork"), { fallthrough: false, maxAge: "1d", immutable: true }));
 }
 app.use(rateLimit({ windowMs: 60_000, limit: 180, standardHeaders: "draft-8", legacyHeaders: false }));
 app.use("/api/system", systemRoutes);
@@ -56,6 +59,7 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/developer", developerRoutes);
 app.use("/api/friends", friendRoutes);
 app.use("/api/shop", shopRoutes);
+app.use("/api/artists", artistRoutes);
 app.get("/health", (_req, res) => res.json({ ok: true, service: "f4we-api" }));
 app.use((_req, res) => res.status(404).json({ error: "Route not found" }));
 app.use(errorHandler);

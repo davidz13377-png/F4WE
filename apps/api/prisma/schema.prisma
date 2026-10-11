@@ -64,6 +64,8 @@ model User {
   rewardInvites           RewardInvite[]
   playlistCollaborations  PlaylistCollaborator[]
   pushTokens              PushToken[]
+  createdCatalogArtists   CatalogArtist[]       @relation("CatalogArtistCreator")
+  createdCatalogReleases  CatalogRelease[]      @relation("CatalogReleaseCreator")
 }
 
 model AccessKey {
@@ -93,12 +95,63 @@ model Music {
   releaseDate  DateTime?
   normalizedTitle  String  @default("")
   normalizedArtist String  @default("")
+  catalogArtistId String?
   uploader     User?       @relation("Uploader", fields: [uploaderId], references: [id], onDelete: SetNull)
+  catalogArtist CatalogArtist? @relation(fields: [catalogArtistId], references: [id], onDelete: SetNull)
   albums       AlbumSong[]
+  releaseTracks CatalogReleaseTrack[]
   favorites    Favorite[]
   plays        MusicPlay[]
 
   @@index([normalizedTitle, normalizedArtist])
+  @@index([catalogArtistId])
+}
+
+model CatalogArtist {
+  id             String           @id @default(cuid())
+  name           String
+  normalizedName String           @unique
+  imageUrl       String?
+  heroUrl        String?
+  bio            String?
+  verified       Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  createdById    String?          @db.VarChar(32)
+  createdBy      User?            @relation("CatalogArtistCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  releases       CatalogRelease[]
+  music          Music[]
+
+  @@index([name])
+}
+
+model CatalogRelease {
+  id              String                @id @default(cuid())
+  artistId        String
+  title           String
+  normalizedTitle String
+  description     String?
+  artworkUrl      String?
+  releaseDate     DateTime?
+  type            String                @default("Album")
+  createdAt       DateTime              @default(now())
+  createdById     String?               @db.VarChar(32)
+  artist          CatalogArtist         @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdBy       User?                 @relation("CatalogReleaseCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  tracks          CatalogReleaseTrack[]
+
+  @@unique([artistId, normalizedTitle])
+  @@index([artistId, releaseDate])
+}
+
+model CatalogReleaseTrack {
+  releaseId String
+  musicId   String
+  order     Int            @default(0)
+  release   CatalogRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  music     Music          @relation(fields: [musicId], references: [id], onDelete: Cascade)
+
+  @@id([releaseId, musicId])
+  @@index([musicId])
 }
 
 model MusicPlay {

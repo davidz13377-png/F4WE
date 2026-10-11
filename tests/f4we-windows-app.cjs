@@ -1,0 +1,81 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const root = path.resolve(__dirname, "..");
+const read = relative => fs.readFileSync(path.join(root, relative), "utf8");
+
+const schema = read("apps/api/prisma/schema.prisma");
+const routes = read("apps/api/src/routes/artists.ts");
+const app = read("apps/api/src/app.ts");
+const storage = read("apps/api/src/services/storage.ts");
+const main = read("desktop-windows/main.cjs");
+const preload = read("desktop-windows/preload.cjs");
+const renderer = read("desktop-windows/renderer/app.js");
+const html = read("desktop-windows/renderer/index.html");
+const css = read("desktop-windows/renderer/styles.css");
+const desktopPackage = JSON.parse(read("desktop-windows/package.json"));
+
+for (const model of ["CatalogArtist", "CatalogRelease", "CatalogReleaseTrack"]) assert.match(schema, new RegExp(`model ${model} \\{`));
+assert.match(schema, /catalogArtistId\s+String\?/);
+assert.match(routes, /router\.post\("\/", staff/);
+assert.match(routes, /router\.post\("\/:id\/releases", staff/);
+assert.match(routes, /router\.get\("\/releases"/);
+assert.match(app, /app\.use\("\/api\/artists", artistRoutes\)/);
+assert.match(storage, /"artist" \| "release-artwork"/);
+
+assert.equal(desktopPackage.version, "1.3.0");
+assert.equal(desktopPackage.build.appId, "com.musicbox.desktop");
+assert.deepEqual(desktopPackage.build.win.target.map(item => item.target), ["nsis", "portable"]);
+assert.match(main, /protocol\.handle\("f4we-media"/);
+assert.match(main, /Authorization: `Bearer \$\{authToken\}`/);
+assert.match(main, /"X-F4WE-Version": APP_VERSION/);
+assert.match(main, /contextIsolation: true/);
+assert.match(main, /nodeIntegration: false/);
+assert.doesNotMatch(main, /webSecurity:\s*false/);
+assert.match(preload, /contextBridge\.exposeInMainWorld\("f4we"/);
+assert.match(renderer, /Add artist/);
+assert.match(renderer, /Add album/);
+assert.match(renderer, /Friends Activity|friends-activity/i);
+assert.match(renderer, /\/api\/shop/);
+assert.match(renderer, /parseTimedLyrics/);
+assert.match(renderer, /Music Manager/);
+assert.match(renderer, /Collaborative playlist/);
+assert.match(renderer, /Account security tools/);
+assert.match(renderer, /Promise\.allSettled\(\[/);
+assert.match(renderer, /function findSongById/);
+assert.match(renderer, /data-open-user/);
+assert.match(renderer, /function openPublicProfile/);
+assert.match(renderer, /navigate\("user", true, false\)/);
+assert.match(renderer, /navigate\("artist", true, false\)/);
+assert.match(renderer, /Too many requests were sent/);
+assert.match(renderer, /profileDesignUrl/);
+assert.match(renderer, /profileDesignUrl \? "has-frame" : "no-frame"/);
+assert.match(renderer, /home-rotation/);
+assert.match(renderer, /The latest F4WE API is not online yet/);
+assert.match(html, /data-view="settings"/);
+assert.match(html, /id="icon-home"/);
+assert.match(html, /id="icon-pause"[\s\S]*?M7 5h4v14H7z/);
+assert.match(html, />Lyrics<\/button>/);
+assert.doesNotMatch(html, /data-text="F4WE">F4WE<\/span><i>/);
+assert.match(`${renderer}\n${css}`, /featured-eclipse\.png/);
+assert.match(css, /glitch-a/);
+assert.match(css, /glitch-strong-a/);
+assert.match(css, /profile-avatar.*avatar-frame/);
+assert.match(css, /\.auth-screen\{background:#000!important\}/);
+assert.match(css, /\.profile-avatar \.avatar-frame\{[\s\S]*?z-index:3!important/);
+assert.match(css, /\.profile-avatar \.avatar-base\{[\s\S]*?z-index:2!important/);
+assert.match(css, /mask-image:none!important/);
+assert.match(css, /\.profile-avatar \.avatar-frame\{[\s\S]*?transform:none!important/);
+assert.match(css, /\.profile-avatar \.avatar-base\{[\s\S]*?transform:translate\(-50%,-50%\)!important/);
+assert.match(css, /\.profile-avatar-hero\.has-frame\{--frame-size:150\.8px;--avatar-inset:17\.4px\}/);
+assert.doesNotMatch(css, /translate\(-13%,-18%\)/);
+assert.match(css, /\.song-duration\{text-align:center\}/);
+assert.match(css, /#play-button \.icon\{[\s\S]*?fill:currentColor!important/);
+assert.match(css, /--accent:#f2f2f3/);
+
+for (const asset of ["desktop-windows/resources/icon.ico", "desktop-windows/resources/icon.png", "desktop-windows/renderer/assets/featured-eclipse.png", "desktop-windows/renderer/assets/f4we-icon.png"]) {
+  assert.ok(fs.statSync(path.join(root, asset)).size > 10_000, `${asset} is missing or empty`);
+}
+
+console.log("PASS: F4WE Windows desktop, protected player, artist catalog, releases and staff settings are wired.");

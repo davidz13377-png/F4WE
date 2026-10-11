@@ -2,6 +2,48 @@
 
 Ettől a verziótól minden kiadás változásai ebbe a fájlba kerülnek. Az alkalmazásban megjelenő update szöveghez a **Public release notes** rész használható. A kizárólag staff/owner vagy technikai változások külön részben szerepelnek.
 
+## 1.3.0 – 2026-10-11
+
+### Public release notes
+
+- F4WE is now available as a native Windows desktop application.
+- The Windows app uses the same account, music library, playlists, friends, F4WE COIN balance and profile as the mobile app.
+- Added a full desktop player with queue, shuffle, repeat, seek, volume, favorites and protected online streaming.
+- Added desktop search for songs, playlists, artists and albums.
+- Added official artist profiles with images, biographies, discographies and connected songs.
+- Added official Albums, EPs and Singles with cover art, release dates and ordered track lists.
+- Friends Activity and Listen Together are available directly from the desktop dashboard.
+- Profiles, yearly recap, notifications, update posts, requests, bug reports, collaborative playlists and the F4WE Shop are available on Windows.
+- Added the animated F4WE glitch identity, the Eclipse of Sound featured artwork and the new Windows application icon.
+- Fixed Windows search so songs and playlists still appear even if an optional catalog endpoint is unavailable.
+- Fixed Home music cards so every displayed song starts with the correct queue.
+- Friend rows and search results now open complete public profiles.
+- Profile designs are now visible on your own profile, friend profiles, search results and navigation avatars.
+- Fixed profile designs so each purchased frame appears only on its owner.
+- Rebuilt desktop avatar layering to keep the portrait mathematically centred while the complete transparent decoration renders above it, matching the mobile app.
+- Removed the conflicting legacy avatar rules and global frame offset that clipped small navigation and friends-list decorations.
+- Framed and unframed avatars now use separate fixed geometry, preventing navigation and friends-list portraits from shifting.
+- Refined the Windows interface with a consistent black/gray theme, white F4WE wordmark and Spotify-style vector icons.
+- Login and registration now use a fully black background, with a denser and stronger monochrome F4WE glitch effect.
+- Adjusted the glitch timing so the F4WE wordmark stays readable between effects.
+- The glitch keeps its fast movement but now appears in shorter, less frequent bursts.
+- Corrected song-duration alignment and made the player pause icon visible on its white control.
+- Fixed friend names and action-button alignment, and renamed the player lyrics control to **Lyrics**.
+
+### Staff and owner tools
+
+- Staff can create official artist pages and upload artist images from the Windows Settings portal.
+- Staff can create Albums, EPs and Singles, upload cover art and connect existing F4WE tracks.
+- Staff can upload new MP3 files directly to R2 from the Windows application.
+- Developer and Owner portals are available under Settings with user, rank, system, maintenance, update and F4WE COIN controls.
+
+### Platform and technical changes
+
+- Added a shared PostgreSQL catalog for artists, releases and ordered release tracks.
+- Added authenticated desktop media streaming with byte-range support and no token exposure in media URLs.
+- Added Windows NSIS installer and portable build targets.
+- Windows app version: `1.3.0`
+
 ## 1.2.0 – 2026-10-06
 
 ### Public release notes

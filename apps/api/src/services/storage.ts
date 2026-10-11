@@ -11,7 +11,7 @@ import path from "node:path";
 import type { Readable } from "node:stream";
 import { env } from "../env.js";
 
-export type ImageCategory = "profile" | "banner" | "profile-design" | "playlist" | "music-artwork";
+export type ImageCategory = "profile" | "banner" | "profile-design" | "playlist" | "music-artwork" | "artist" | "release-artwork";
 export type DirectUploadCategory = ImageCategory | "music";
 
 const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
