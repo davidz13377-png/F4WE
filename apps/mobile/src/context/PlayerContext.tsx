@@ -88,6 +88,7 @@ export function PlayerProvider({ children }: PropsWithChildren) {
   const [playSession, setPlaySession] = useState<{ musicId: string; id: string } | null>(null);
   const [editedMetadata, setEditedMetadata] = useState<Record<string, { title: string; artist: string }>>({});
   const changingTrack = useRef(false), durationSent = useRef(new Set<string>()), lastPresenceSent = useRef(0);
+  const rewardClock = useRef<{ key: string; pendingMs: number; startedAt: number | null }>({ key: "", pendingMs: 0, startedAt: null });
 
   useEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => { queueControlsRef.current = queueControls; }, [queueControls]);
@@ -113,15 +114,22 @@ export function PlayerProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     if (!playSession || playback.state !== State.Playing || String(active?.id) !== playSession.musicId) return;
-    let lastHeartbeat = Date.now();
-    const timer = setInterval(() => {
-      const now = Date.now(), seconds = Math.max(1, Math.min(600, Math.round((now - lastHeartbeat) / 1000)));
-      lastHeartbeat = now;
+    const key = `${playSession.musicId}:${playSession.id}`;
+    rewardClock.current = { key, pendingMs: 0, startedAt: Date.now() };
+    const collect = () => {
+      const clock = rewardClock.current; if (clock.key !== key || clock.startedAt === null) return;
+      const now = Date.now(); clock.pendingMs += Math.max(0, now - clock.startedAt); clock.startedAt = now;
+    };
+    const flush = () => {
+      collect(); const clock = rewardClock.current; if (clock.key !== key) return;
+      const seconds = Math.min(600, Math.floor(clock.pendingMs / 1000)); if (seconds < 1) return;
+      clock.pendingMs -= seconds * 1000;
       void api(`/api/music/${encodeURIComponent(playSession.musicId)}/play/${encodeURIComponent(playSession.id)}`, {
         method: "PATCH", body: JSON.stringify({ seconds })
-      }).catch(() => undefined);
-    }, 10_000);
-    return () => clearInterval(timer);
+      }).catch(() => { if (rewardClock.current.key === key) rewardClock.current.pendingMs += seconds * 1000; });
+    };
+    const timer = setInterval(flush, 10_000);
+    return () => { clearInterval(timer); collect(); rewardClock.current.startedAt = null; flush(); };
   }, [playSession?.id, active?.id, playback.state]);
 
   useEffect(() => {

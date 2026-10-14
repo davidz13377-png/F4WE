@@ -11,11 +11,13 @@ const isStaff = user => !!user?.isOwner || ["Moderator", "Admin", "Developer"].i
 const isDeveloper = user => !!user?.isOwner || user?.rank === "Developer";
 
 const state = {
-  config: { apiUrl: "", version: "1.2.0" }, token: localStorage.getItem("f4we.token") || "", user: null,
+  config: { apiUrl: "", version: "1.4.0" }, token: localStorage.getItem("f4we.token") || "", user: null,
   songs: [], playlists: [], favorites: [], friends: [], artists: [], releases: [], rotation: [], featured: null,
   notifications: [], view: "home", settingsTab: "account", history: ["home"], historyIndex: 0,
   active: null, queue: [], queueIndex: -1, shuffle: false, repeat: false, playId: null, heartbeat: null,
-  listeningFollowers: [], followingId: null, selectedArtistImage: null, selectedReleaseImage: null
+  playbackRequest: 0, rewardStartedAt: null, rewardPendingMs: 0, presenceCleanup: [], lastCoinEvent: null,
+  listeningFollowers: [], followingId: null, selectedArtistImage: null, selectedArtistHero: null, selectedReleaseImage: null,
+  catalogSongs: []
 };
 
 const audio = new Audio();
@@ -75,8 +77,9 @@ function updateUserChrome() {
   for (const id of ["#sidebar-frame", "#top-frame"]) {
     const frame = $(id); if (!frame) continue;
     const hasFrame = !!state.user?.profileDesignUrl;
-    frame.src = state.user?.profileDesignUrl || "";
+    if (hasFrame) frame.src = state.user.profileDesignUrl; else frame.removeAttribute("src");
     frame.classList.toggle("hidden", !hasFrame);
+    frame.setAttribute("aria-hidden", String(!hasFrame));
     frame.parentElement?.classList.toggle("has-frame", hasFrame);
   }
   $("#sidebar-name").textContent = state.user?.username || "F4WE"; $("#top-username").textContent = state.user?.username || "F4WE";
@@ -115,9 +118,11 @@ async function loadCore() {
 }
 
 function connectPresence() {
+  state.presenceCleanup.forEach(cleanup => cleanup());
+  state.presenceCleanup = [];
   window.f4we.presence.disconnect();
   window.f4we.presence.connect(state.config.apiUrl, state.token);
-  window.f4we.presence.on("listening:state", value => {
+  state.presenceCleanup.push(window.f4we.presence.on("listening:state", value => {
     const friend = state.friends.find(item => item.id === value.userId); if (friend) friend.listening = value;
     renderFriendsPanel();
     if (state.followingId === value.userId) void (async () => {
@@ -128,20 +133,28 @@ function connectPresence() {
       if (Math.abs(audio.currentTime - target) > 1.25) audio.currentTime = target;
       if (value.playing && audio.paused) await audio.play(); else if (!value.playing && !audio.paused) audio.pause();
     })().catch(error => toast(error.message, "error"));
-  });
-  window.f4we.presence.on("listening:unavailable", value => {
+  }));
+  state.presenceCleanup.push(window.f4we.presence.on("listening:unavailable", value => {
     const friend = state.friends.find(item => item.id === value.userId); if (friend) friend.listening = null;
     if (state.followingId === value.userId) { state.followingId = null; toast("Listening together ended"); }
     renderFriendsPanel();
-  });
-  window.f4we.presence.on("listening:followers", value => { state.listeningFollowers = Array.isArray(value) ? value : []; if (state.view === "home") renderHome(); });
-  window.f4we.presence.on("coinsChanged", value => { if (state.user) state.user.coins = value.coins; toast(`+${value.granted} F4WE COIN`); });
-  window.f4we.presence.on("profileChanged", value => { state.user = { ...state.user, ...value }; updateUserChrome(); });
-  window.f4we.presence.on("rankChanged", value => { state.user.rank = value.rank; updateUserChrome(); toast(`Your rank is now ${value.rank}.`); });
+  }));
+  state.presenceCleanup.push(window.f4we.presence.on("listening:followers", value => { state.listeningFollowers = Array.isArray(value) ? value : []; if (state.view === "home") renderHome(); }));
+  state.presenceCleanup.push(window.f4we.presence.on("coinsChanged", value => {
+    if (state.user && Number.isFinite(value?.coins)) state.user.coins = value.coins;
+    if (!value?.granted) return;
+    const key = `${value.coins}:${value.granted}`, now = Date.now();
+    if (state.lastCoinEvent?.key === key && now - state.lastCoinEvent.at < 2_000) return;
+    state.lastCoinEvent = { key, at: now }; toast(`+${value.granted} F4WE COIN`);
+  }));
+  state.presenceCleanup.push(window.f4we.presence.on("profileChanged", value => { state.user = { ...state.user, ...value }; updateUserChrome(); }));
+  state.presenceCleanup.push(window.f4we.presence.on("rankChanged", value => { state.user.rank = value.rank; updateUserChrome(); toast(`Your rank is now ${value.rank}.`); }));
 }
 
 function logout(showMessage = true) {
-  clearInterval(state.heartbeat); audio.pause(); audio.removeAttribute("src"); state.user = null; state.active = null;
+  state.playbackRequest++; void stopHeartbeat(false); audio.pause(); audio.removeAttribute("src"); state.user = null; state.active = null;
+  state.presenceCleanup.forEach(cleanup => cleanup()); state.presenceCleanup = [];
+  window.f4we.mediaControls?.update({ active: false, playing: false });
   window.f4we.presence.disconnect(); void setToken("");
   $("#app-shell").classList.add("hidden"); $("#auth-screen").classList.remove("hidden");
   if (showMessage) toast("Signed out");
@@ -187,8 +200,19 @@ function renderFriendsPanel() {
 }
 
 function recentSongs() {
-  const ids = JSON.parse(localStorage.getItem("f4we.recent") || "[]");
+  const ids = readRecentIds();
   return ids.map(id => state.songs.find(song => song.id === id)).filter(Boolean).slice(0, 6);
+}
+
+function recentStorageKey() { return state.user?.id ? `f4we.recent.${state.user.id}` : null; }
+function readRecentIds() {
+  const key = recentStorageKey(); if (!key) return [];
+  try { const value = JSON.parse(localStorage.getItem(key) || "[]"); return Array.isArray(value) ? value.filter(id => typeof id === "string") : []; }
+  catch { return []; }
+}
+function rememberRecent(songId) {
+  const key = recentStorageKey(); if (!key) return;
+  localStorage.setItem(key, JSON.stringify([songId, ...readRecentIds().filter(id => id !== songId)].slice(0, 20)));
 }
 
 function renderHome() {
@@ -259,9 +283,10 @@ async function openArtist(id) {
   navigate("artist", true, false); $("#view").innerHTML = '<div class="hero skeleton"></div>';
   try {
     const artist = await api(`/api/artists/${encodeURIComponent(id)}`); state.openArtist = artist;
-    $("#view").innerHTML = `<section class="artist-hero" style="${artist.heroUrl ? `background-image:url('${safe(artist.heroUrl)}');background-size:cover` : ""}"><img src="${image(artist.imageUrl)}" alt=""><div class="detail-copy"><p class="section-kicker">${artist.verified ? "◆ VERIFIED ARTIST" : "ARTIST"}</p><h1>${safe(artist.name)}</h1><p>${safe(artist.bio || `${artist.releases.length} releases on F4WE`)}</p><div class="detail-actions"><button class="primary" data-play-song="${safe(artist.music[0]?.id || "")}" data-queue-source="artist">▶ Play</button></div></div></section>
+    $("#view").innerHTML = `<section class="artist-hero">${artist.heroUrl ? `<img class="artist-hero-bg" src="${image(artist.heroUrl)}" alt="">` : ""}<img class="artist-portrait" src="${image(artist.imageUrl)}" alt=""><div class="detail-copy"><p class="section-kicker">${artist.verified ? "◆ VERIFIED ARTIST" : "ARTIST"}</p><h1>${safe(artist.name)}</h1><p>${safe(artist.bio || `${artist.releases.length} releases on F4WE`)}</p><div class="detail-actions"><button class="primary" data-play-song="${safe(artist.music[0]?.id || "")}" data-queue-source="artist">▶ Play</button>${isStaff(state.user) ? '<button class="secondary" id="edit-artist">Edit artist</button>' : ""}</div></div></section>
       <section class="section"><div class="section-head"><h2>Popular</h2></div>${songTable(artist.music.slice(0, 10), { source: "artist", label: artist.name })}</section>
       <section class="section"><div class="section-head"><h2>Discography</h2></div><div class="row-cards">${artist.releases.map(item => mediaCard({ ...item, artist }, "release")).join("") || '<p class="empty-state">No releases yet.</p>'}</div></section>`;
+    $("#edit-artist")?.addEventListener("click", () => editArtist(artist));
   } catch (error) { $("#view").innerHTML = `<div class="empty-state"><strong>Could not open artist</strong><p>${safe(error.message)}</p></div>`; }
 }
 
@@ -269,8 +294,50 @@ async function openRelease(id) {
   navigate("release", true, false); $("#view").innerHTML = '<div class="hero skeleton"></div>';
   try {
     const release = await api(`/api/artists/releases/${encodeURIComponent(id)}`); state.openRelease = release;
-    $("#view").innerHTML = `<section class="release-hero"><img src="${image(release.artworkUrl || release.artist.imageUrl)}" alt=""><div class="detail-copy"><p class="section-kicker">${safe(release.type || "ALBUM")}</p><h1>${safe(release.title)}</h1><p><button class="text-button" data-open-artist="${safe(release.artist.id)}">${safe(release.artist.name)}</button> · ${release.releaseDate ? new Date(release.releaseDate).getUTCFullYear() : new Date(release.createdAt).getUTCFullYear()} · ${release.tracks.length} songs</p><div class="detail-actions"><button class="primary" data-play-song="${safe(release.tracks[0]?.id || "")}" data-queue-source="release">▶ Play album</button></div></div></section>${songTable(release.tracks, { source: "release", label: release.title })}`;
+    $("#view").innerHTML = `<section class="release-hero"><img src="${image(release.artworkUrl || release.artist.imageUrl)}" alt=""><div class="detail-copy"><p class="section-kicker">${safe(release.type || "ALBUM")}</p><h1>${safe(release.title)}</h1><p><button class="text-button" data-open-artist="${safe(release.artist.id)}">${safe(release.artist.name)}</button> · ${release.releaseDate ? new Date(release.releaseDate).getUTCFullYear() : new Date(release.createdAt).getUTCFullYear()} · ${release.tracks.length} songs</p><div class="detail-actions"><button class="primary" data-play-song="${safe(release.tracks[0]?.id || "")}" data-queue-source="release">▶ Play album</button>${isStaff(state.user) ? '<button class="secondary" id="edit-release">Edit album</button>' : ""}</div></div></section>${songTable(release.tracks, { source: "release", label: release.title })}`;
+    $("#edit-release")?.addEventListener("click", () => editRelease(release));
   } catch (error) { $("#view").innerHTML = `<div class="empty-state"><strong>Could not open album</strong><p>${safe(error.message)}</p></div>`; }
+}
+
+async function pickCatalogAsset(category, title) {
+  const result = await window.f4we.pickAndUpload({ accept: "image", title, startPath: "/api/artists/assets/upload-url", completePath: "/api/artists/assets/complete", startPayload: { category }, completePayload: { category } });
+  if (result.canceled) return null;
+  if (!result.ok) { toast(uploadError(result), "error"); return null; }
+  return result.data.url;
+}
+
+async function editArtist(artist) {
+  let imageUrl = artist.imageUrl || null, heroUrl = artist.heroUrl || null;
+  showModal(`<p class="section-kicker">STAFF CATALOG</p><h2>Edit artist</h2><form id="edit-artist-form"><div class="form-grid"><label class="field">Artist name<input name="name" value="${safe(artist.name)}" maxlength="120" required></label><label class="field full">Biography<textarea name="bio" maxlength="2000">${safe(artist.bio || "")}</textarea></label><label class="check-song full"><input type="checkbox" name="verified" ${artist.verified ? "checked" : ""}> Verified artist</label><button type="button" class="file-picker" id="edit-artist-image">Change artist image</button><button type="button" class="file-picker" id="edit-artist-banner">Change artist banner</button></div><div class="asset-status" id="edit-artist-status">Portrait: ${imageUrl ? "set" : "default"} · Banner: ${heroUrl ? "set" : "none"}</div><div class="form-actions"><button class="primary">Save artist</button><button type="button" class="secondary" id="clear-artist-image">Remove image</button><button type="button" class="secondary" id="clear-artist-banner">Remove banner</button></div></form>`);
+  const status = () => { $("#edit-artist-status").textContent = `Portrait: ${imageUrl ? "set" : "default"} · Banner: ${heroUrl ? "set" : "none"}`; };
+  $("#edit-artist-image").addEventListener("click", async () => { const value = await pickCatalogAsset("artist", "Choose artist image"); if (value) { imageUrl = value; status(); } });
+  $("#edit-artist-banner").addEventListener("click", async () => { const value = await pickCatalogAsset("artist", "Choose artist banner"); if (value) { heroUrl = value; status(); } });
+  $("#clear-artist-image").addEventListener("click", () => { imageUrl = null; status(); });
+  $("#clear-artist-banner").addEventListener("click", () => { heroUrl = null; status(); });
+  $("#edit-artist-form").addEventListener("submit", async event => {
+    event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget));
+    try {
+      await api(`/api/artists/${encodeURIComponent(artist.id)}`, { method: "PATCH", body: { name: values.name, bio: values.bio || null, imageUrl, heroUrl, verified: new FormData(event.currentTarget).has("verified") } });
+      state.artists = await api("/api/artists"); closeModal(); toast("Artist updated"); await openArtist(artist.id);
+    } catch (error) { toast(error.message, "error"); }
+  });
+}
+
+async function editRelease(release) {
+  let songs;
+  try { songs = await loadCatalogSongs(); } catch (error) { toast(error.message, "error"); return; }
+  let artworkUrl = release.artworkUrl || null;
+  showModal(`<p class="section-kicker">STAFF CATALOG</p><h2>Edit album</h2><form id="edit-release-form"><div class="form-grid"><label class="field">Artist<select name="artistId" required>${state.artists.map(item => `<option value="${safe(item.id)}" ${item.id === release.artist.id ? "selected" : ""}>${safe(item.name)}</option>`).join("")}</select></label><label class="field">Title<input name="title" value="${safe(release.title)}" maxlength="150" required></label><label class="field">Type<select name="type">${["Album","EP","Single"].map(type => `<option ${release.type === type ? "selected" : ""}>${type}</option>`).join("")}</select></label><label class="field">Release date<input name="releaseDate" type="date" value="${safe(release.releaseDate?.slice(0,10) || "")}"></label><label class="field full">Description<textarea name="description">${safe(release.description || "")}</textarea></label><button type="button" class="file-picker full" id="edit-release-image">Change album cover</button>${trackPickerMarkup(songs, release.tracks.map(song => song.id), "edit-release")}</div><div class="asset-status" id="edit-release-status">Cover: ${artworkUrl ? "set" : "default"}</div><div class="form-actions"><button class="primary">Save album</button><button type="button" class="secondary" id="clear-release-image">Remove cover</button></div></form>`);
+  wireTrackSearch("edit-release");
+  $("#edit-release-image").addEventListener("click", async () => { const value = await pickCatalogAsset("release-artwork", "Choose album cover"); if (value) { artworkUrl = value; $("#edit-release-status").textContent = "Cover: set"; } });
+  $("#clear-release-image").addEventListener("click", () => { artworkUrl = null; $("#edit-release-status").textContent = "Cover: default"; });
+  $("#edit-release-form").addEventListener("submit", async event => {
+    event.preventDefault(); const form = new FormData(event.currentTarget);
+    try {
+      await api(`/api/artists/releases/${encodeURIComponent(release.id)}`, { method: "PATCH", body: { artistId: form.get("artistId"), title: form.get("title"), type: form.get("type"), description: form.get("description") || null, releaseDate: form.get("releaseDate") || null, artworkUrl, songIds: form.getAll("songId") } });
+      [state.artists, state.releases] = await Promise.all([api("/api/artists"), api("/api/artists/releases")]); closeModal(); toast("Album updated"); await openRelease(release.id);
+    } catch (error) { toast(error.message, "error"); }
+  });
 }
 
 async function openPlaylist(id) {
@@ -422,7 +489,7 @@ function renderSettings(tab = state.settingsTab) {
   if (tab === "account") renderAccountSettings();
   else if (tab === "playback") renderPlaybackSettings();
   else if (tab === "shop") void renderShop();
-  else if (tab === "staff") renderStaffSettings();
+  else if (tab === "staff") void renderStaffSettings();
   else if (tab === "developer") renderDeveloperSettings();
   else if (tab === "owner") void renderOwnerSettings();
   else renderAboutSettings();
@@ -450,27 +517,55 @@ function renderPlaybackSettings() {
   $("#privacy-toggle").addEventListener("click", async () => { try { const value = !state.user.shareListening; await api("/api/profile/me/listening-privacy", { method: "PATCH", body: { shareListening: value } }); state.user.shareListening = value; window.f4we.presence.emit("listening:privacy", value); renderPlaybackSettings(); } catch (error) { toast(error.message, "error"); } });
 }
 
-function renderStaffSettings() {
-  $("#settings-panel").innerHTML = `<section class="settings-section"><h2>Add artist</h2><p>Create an official artist profile visible in search, albums and music pages.</p><form id="artist-form"><div class="form-grid"><label class="field">Artist name<input name="name" maxlength="120" required></label><label class="field full">Biography<textarea name="bio" maxlength="2000"></textarea></label><button type="button" class="file-picker full" id="artist-image">Choose artist image</button></div><div id="artist-image-status"></div><div class="form-actions"><button class="primary">Add artist</button></div></form></section>
-    <section class="settings-section"><h2>Add album</h2><p>Add an Album, EP or Single to an artist and connect existing F4WE songs.</p><form id="release-form"><div class="form-grid"><label class="field">Artist<select name="artistId" required><option value="">Choose artist</option>${state.artists.map(item => `<option value="${safe(item.id)}">${safe(item.name)}</option>`).join("")}</select></label><label class="field">Title<input name="title" maxlength="150" required></label><label class="field">Type<select name="type"><option>Album</option><option>EP</option><option>Single</option></select></label><label class="field">Release date<input name="releaseDate" type="date"></label><label class="field full">Description<textarea name="description"></textarea></label><button type="button" class="file-picker full" id="release-image">Choose album cover</button><div class="field full">Select tracks<div class="checkbox-list">${state.songs.map(song => `<label class="check-song"><img src="${image(song.artworkUrl)}"><input type="checkbox" name="songId" value="${safe(song.id)}"><span>${safe(song.title)}<br><small>${safe(song.artist || "Unknown artist")}</small></span></label>`).join("")}</div></div></div><div id="release-image-status"></div><div class="form-actions"><button class="primary">Add album</button></div></form></section>
+async function loadCatalogSongs(force = false) {
+  if (!force && state.catalogSongs.length) return state.catalogSongs;
+  state.catalogSongs = await api("/api/artists/manage/songs");
+  return state.catalogSongs;
+}
+
+function trackPickerMarkup(songs, selectedIds = [], prefix = "release") {
+  const selected = new Set(selectedIds);
+  return `<div class="field full track-picker"><span>Select tracks</span><div class="track-search"><input id="${safe(prefix)}-track-search" type="search" placeholder="Search by song or artist"><b id="${safe(prefix)}-track-count">${songs.length} songs</b></div><div class="checkbox-list" id="${safe(prefix)}-track-list">${songs.map(song => `<label class="check-song" data-track-search="${safe(`${song.title} ${song.artist || ""}`.toLocaleLowerCase("en-US"))}"><img src="${image(song.artworkUrl)}"><input type="checkbox" name="songId" value="${safe(song.id)}" ${selected.has(song.id) ? "checked" : ""}><span>${safe(song.title)}<br><small>${safe(song.artist || "Unknown artist")}</small></span></label>`).join("")}</div></div>`;
+}
+
+function wireTrackSearch(prefix) {
+  const input = $(`#${CSS.escape(prefix)}-track-search`), list = $(`#${CSS.escape(prefix)}-track-list`), count = $(`#${CSS.escape(prefix)}-track-count`);
+  if (!input || !list) return;
+  input.addEventListener("input", () => {
+    const query = input.value.trim().toLocaleLowerCase("en-US"); let visible = 0;
+    $$(".check-song", list).forEach(item => { const show = !query || item.dataset.trackSearch.includes(query); item.classList.toggle("hidden", !show); if (show) visible++; });
+    if (count) count.textContent = `${visible} of ${$$('.check-song', list).length} songs`;
+  });
+}
+
+async function renderStaffSettings() {
+  $("#settings-panel").innerHTML = '<div class="surface skeleton" style="height:320px"></div>';
+  let songs;
+  try { songs = await loadCatalogSongs(true); }
+  catch (error) { $("#settings-panel").innerHTML = `<div class="empty-state"><strong>Could not load the staff catalog</strong><p>${safe(error.message)}</p></div>`; return; }
+  if (state.view !== "settings" || state.settingsTab !== "staff") return;
+  $("#settings-panel").innerHTML = `<section class="settings-section"><h2>Add artist</h2><p>Create an official artist profile visible in search, albums and music pages.</p><form id="artist-form"><div class="form-grid"><label class="field">Artist name<input name="name" maxlength="120" required></label><label class="field full">Biography<textarea name="bio" maxlength="2000"></textarea></label><button type="button" class="file-picker" id="artist-image">Choose artist image</button><button type="button" class="file-picker" id="artist-banner">Choose artist banner</button></div><div id="artist-image-status"></div><div id="artist-banner-status"></div><div class="form-actions"><button class="primary">Add artist</button></div></form></section>
+    <section class="settings-section"><h2>Add album</h2><p>Add an Album, EP or Single to an artist and connect any existing F4WE song.</p><form id="release-form"><div class="form-grid"><label class="field">Artist<select name="artistId" required><option value="">Choose artist</option>${state.artists.map(item => `<option value="${safe(item.id)}">${safe(item.name)}</option>`).join("")}</select></label><label class="field">Title<input name="title" maxlength="150" required></label><label class="field">Type<select name="type"><option>Album</option><option>EP</option><option>Single</option></select></label><label class="field">Release date<input name="releaseDate" type="date"></label><label class="field full">Description<textarea name="description"></textarea></label><button type="button" class="file-picker full" id="release-image">Choose album cover</button>${trackPickerMarkup(songs, [], "release")}</div><div id="release-image-status"></div><div class="form-actions"><button class="primary">Add album</button></div></form></section>
     <section class="settings-section"><h2>Music upload</h2><p>Upload a verified MP3 directly to the same R2 storage used by mobile.</p><form id="music-upload-form"><div class="form-grid"><label class="field">Title<input name="title" required></label><label class="field">Artist<input name="artist"></label><label class="field">Release date<input name="releaseDate" type="date"></label></div><div class="form-actions"><button class="primary">Choose MP3 and upload</button></div></form></section>
     <section class="settings-section"><h2>Music Manager</h2><p>Edit metadata, artwork, lyrics, audio cuts or remove a song.</p><div id="music-manager-list">${state.songs.slice(0, 100).map(song => `<div class="friend-card"><div class="friend-avatar"><img src="${image(song.artworkUrl)}"></div><div><strong>${safe(song.title)}</strong><p>${safe(song.artist || "Unknown artist")} · ${formatTime(song.duration)}</p></div><div class="mini-actions"><button data-manage-song="${safe(song.id)}">Manage</button></div></div>`).join("")}</div></section>
     ${["Admin","Developer"].includes(state.user.rank) || state.user.isOwner ? '<section class="settings-section"><h2>Request moderation</h2><p>Review active music requests and bug reports.</p><button class="secondary" id="load-moderation">Load moderation queue</button><div id="moderation-list" style="margin-top:15px"></div></section>' : ""}`;
-  $("#artist-image").addEventListener("click", () => uploadCatalogAsset("artist")); $("#release-image").addEventListener("click", () => uploadCatalogAsset("release-artwork"));
+  wireTrackSearch("release");
+  $("#artist-image").addEventListener("click", () => uploadCatalogAsset("artist", "portrait")); $("#artist-banner").addEventListener("click", () => uploadCatalogAsset("artist", "banner")); $("#release-image").addEventListener("click", () => uploadCatalogAsset("release-artwork", "release"));
   $("#artist-form").addEventListener("submit", createArtist); $("#release-form").addEventListener("submit", createRelease); $("#music-upload-form").addEventListener("submit", uploadMusic);
   $("#load-moderation")?.addEventListener("click", loadStaffModeration);
 }
 
-async function uploadCatalogAsset(category) {
-  const result = await window.f4we.pickAndUpload({ accept: "image", title: category === "artist" ? "Choose artist image" : "Choose album cover", startPath: "/api/artists/assets/upload-url", completePath: "/api/artists/assets/complete", startPayload: { category }, completePayload: { category } });
-  if (result.canceled) return; if (!result.ok) return toast(uploadError(result), "error");
-  if (category === "artist") { state.selectedArtistImage = result.data.url; $("#artist-image-status").innerHTML = `<p>✓ Artist image ready</p>`; }
-  else { state.selectedReleaseImage = result.data.url; $("#release-image-status").innerHTML = `<p>✓ Album cover ready</p>`; }
+async function uploadCatalogAsset(category, target) {
+  const title = target === "banner" ? "Choose artist banner" : category === "artist" ? "Choose artist image" : "Choose album cover";
+  const url = await pickCatalogAsset(category, title); if (!url) return;
+  if (target === "portrait") { state.selectedArtistImage = url; $("#artist-image-status").innerHTML = `<p>✓ Artist image ready</p>`; }
+  else if (target === "banner") { state.selectedArtistHero = url; $("#artist-banner-status").innerHTML = `<p>✓ Artist banner ready</p>`; }
+  else { state.selectedReleaseImage = url; $("#release-image-status").innerHTML = `<p>✓ Album cover ready</p>`; }
 }
 
 async function createArtist(event) {
   event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget));
-  try { await api("/api/artists", { method: "POST", body: { ...values, imageUrl: state.selectedArtistImage || undefined } }); state.selectedArtistImage = null; state.artists = await api("/api/artists"); toast("Artist added to F4WE"); renderSettings("staff"); } catch (error) { toast(error.message, "error"); }
+  try { await api("/api/artists", { method: "POST", body: { ...values, imageUrl: state.selectedArtistImage || undefined, heroUrl: state.selectedArtistHero || undefined } }); state.selectedArtistImage = null; state.selectedArtistHero = null; state.artists = await api("/api/artists"); toast("Artist added to F4WE"); renderSettings("staff"); } catch (error) { toast(error.message, "error"); }
 }
 
 async function createRelease(event) {
@@ -531,7 +626,7 @@ async function renderOwnerSettings() {
   } catch (error) { $("#settings-panel").innerHTML = `<div class="empty-state">${safe(error.message)}</div>`; }
 }
 
-function renderAboutSettings() { $("#settings-panel").innerHTML = `<section class="settings-section"><h2>F4WE for Windows</h2><p>The full desktop version of your F4WE community, powered by the same API, PostgreSQL database and R2 library as mobile.</p><div class="toggle-row"><div><strong>Version</strong><p>${safe(state.config.version)}</p></div><span class="status-chip">CURRENT</span></div><div class="toggle-row"><div><strong>Website</strong><p>Download updates and invite friends.</p></div><button class="secondary" id="open-site">Open f4we.xyz</button></div></section>`; $("#open-site").addEventListener("click", () => window.f4we.openExternal("https://f4we.xyz/")); }
+function renderAboutSettings() { $("#settings-panel").innerHTML = `<section class="settings-section"><h2>F4WE for Windows</h2><p>The full desktop version of your F4WE community, powered by the same API, PostgreSQL database and R2 library as mobile.</p><div class="toggle-row"><div><strong>Owned by</strong><p>This app is Owned By notxenom1</p></div><span class="status-chip">F4WE</span></div><div class="toggle-row"><div><strong>Version</strong><p>${safe(state.config.version)}</p></div><span class="status-chip">CURRENT</span></div><div class="toggle-row"><div><strong>Website</strong><p>Download updates and invite friends.</p></div><button class="secondary" id="open-site">Open f4we.xyz</button></div></section>`; $("#open-site").addEventListener("click", () => window.f4we.openExternal("https://f4we.xyz/")); }
 
 function queueFor(source) {
   if (source === "favorites") return state.favorites;
@@ -561,13 +656,23 @@ function findSongById(id) {
 
 async function playSong(song, queue = state.songs, options = {}) {
   if (!song?.id) return;
+  const requestId = ++state.playbackRequest;
+  await stopHeartbeat(true);
+  if (requestId !== state.playbackRequest) return;
   if (!options.following && state.followingId) { window.f4we.presence.emit("listening:leave"); state.followingId = null; }
   state.queue = queue.some(item => item.id === song.id) ? [...queue] : [song, ...queue];
   state.queueIndex = state.queue.findIndex(item => item.id === song.id); state.active = song;
+  audio.pause();
   audio.src = `f4we-media://music/${encodeURIComponent(song.id)}`; audio.load(); updatePlayerChrome();
-  const recent = [song.id, ...JSON.parse(localStorage.getItem("f4we.recent") || "[]").filter(id => id !== song.id)].slice(0, 20); localStorage.setItem("f4we.recent", JSON.stringify(recent));
-  try { await audio.play(); } catch (error) { toast(`Playback failed: ${error.message}`, "error"); }
-  try { const result = await api(`/api/music/${encodeURIComponent(song.id)}/play`, { method: "POST" }); state.playId = result.id; } catch { state.playId = null; }
+  rememberRecent(song.id);
+  try { await audio.play(); }
+  catch (error) {
+    const interrupted = error?.name === "AbortError" || /play\(\) request was interrupted by a new load request/i.test(String(error?.message || error));
+    if (requestId !== state.playbackRequest || interrupted) return;
+    toast(`Playback failed: ${error.message}`, "error"); return;
+  }
+  if (requestId !== state.playbackRequest) return;
+  try { const result = await api(`/api/music/${encodeURIComponent(song.id)}/play`, { method: "POST" }); if (requestId !== state.playbackRequest) return; state.playId = result.id; } catch { if (requestId !== state.playbackRequest) return; state.playId = null; }
   startHeartbeat(); publishPresence(); renderPlayerSensitiveView();
 }
 
@@ -575,14 +680,39 @@ function updatePlayerChrome() {
   const song = state.active; $("#player-title").textContent = song?.title || "Choose a song"; $("#player-artist").textContent = song?.artist || "F4WE"; $("#player-artwork").src = song?.artworkUrl || fallbackArt;
   $("#play-button").innerHTML = icon(audio.paused ? "play" : "pause"); $("#like-current").classList.toggle("active", !!song && state.favorites.some(item => item.id === song.id)); $("#like-current").innerHTML = icon("heart");
   $("#shuffle-button").classList.toggle("active", state.shuffle); $("#repeat-button").classList.toggle("active", state.repeat);
+  window.f4we.mediaControls?.update({ active: !!song, playing: !!song && !audio.paused });
+}
+
+function collectRewardTime() {
+  if (!state.rewardStartedAt) return;
+  const now = Date.now(); state.rewardPendingMs += Math.max(0, now - state.rewardStartedAt); state.rewardStartedAt = audio.paused ? null : now;
+}
+
+async function flushHeartbeat() {
+  collectRewardTime();
+  const seconds = Math.floor(state.rewardPendingMs / 1000);
+  if (!state.active || !state.playId || seconds < 1) return;
+  const sentSeconds = Math.min(600, seconds); state.rewardPendingMs -= sentSeconds * 1000;
+  const musicId = state.active.id, playId = state.playId;
+  await api(`/api/music/${encodeURIComponent(musicId)}/play/${encodeURIComponent(playId)}`, { method: "PATCH", body: { seconds: sentSeconds } }).catch(() => {
+    if (state.active?.id === musicId && state.playId === playId) state.rewardPendingMs += sentSeconds * 1000;
+  });
+}
+
+async function stopHeartbeat(flush = false) {
+  clearInterval(state.heartbeat); state.heartbeat = null;
+  collectRewardTime();
+  const musicId = state.active?.id, playId = state.playId, seconds = Math.min(600, Math.floor(state.rewardPendingMs / 1000));
+  state.rewardStartedAt = null; state.rewardPendingMs = 0; state.playId = null;
+  if (flush && musicId && playId && seconds > 0) {
+    await api(`/api/music/${encodeURIComponent(musicId)}/play/${encodeURIComponent(playId)}`, { method: "PATCH", body: { seconds } }).catch(() => undefined);
+  }
 }
 
 function startHeartbeat() {
   clearInterval(state.heartbeat);
-  state.heartbeat = setInterval(() => {
-    if (!audio.paused && state.active && state.playId) void api(`/api/music/${encodeURIComponent(state.active.id)}/play/${encodeURIComponent(state.playId)}`, { method: "PATCH", body: { seconds: 30 } }).catch(() => undefined);
-    publishPresence();
-  }, 30_000);
+  state.rewardPendingMs = 0; state.rewardStartedAt = audio.paused ? null : Date.now();
+  state.heartbeat = setInterval(() => { void flushHeartbeat(); publishPresence(); }, 10_000);
 }
 
 function publishPresence() {
@@ -599,7 +729,10 @@ function renderPlayerSensitiveView() {
   }
 }
 
-function togglePlay() { if (!state.active) { if (state.songs[0]) void playSong(state.songs[0]); return; } if (audio.paused) void audio.play(); else audio.pause(); }
+function togglePlay() {
+  if (!state.active) { if (state.songs[0]) void playSong(state.songs[0]); return; }
+  if (audio.paused) void audio.play().catch(error => { if (error?.name !== "AbortError") toast(`Playback failed: ${error.message}`, "error"); }); else audio.pause();
+}
 function playNext() {
   if (!state.queue.length) return; let index;
   if (state.shuffle) index = Math.floor(Math.random() * state.queue.length); else index = state.queueIndex + 1;
@@ -728,8 +861,15 @@ $("#back-button").addEventListener("click", () => { if (state.historyIndex <= 0)
 $("#forward-button").addEventListener("click", () => { if (state.historyIndex >= state.history.length - 1) return; state.historyIndex++; navigate(state.history[state.historyIndex], false); });
 document.addEventListener("keydown", event => { if (event.ctrlKey && event.key.toLowerCase() === "k") { event.preventDefault(); $("#search-input").focus(); } if (event.code === "Space" && !["INPUT","TEXTAREA","SELECT"].includes(document.activeElement.tagName)) { event.preventDefault(); togglePlay(); } });
 
-audio.addEventListener("play", () => { updatePlayerChrome(); publishPresence(); });
-audio.addEventListener("pause", () => { updatePlayerChrome(); publishPresence(); });
+window.f4we.mediaControls?.onAction(action => {
+  if (action === "like" && state.active) void toggleLike(state.active.id);
+  else if (action === "previous") playPrevious();
+  else if (action === "toggle") togglePlay();
+  else if (action === "next") playNext();
+});
+
+audio.addEventListener("play", () => { if (state.playId && !state.rewardStartedAt) state.rewardStartedAt = Date.now(); updatePlayerChrome(); publishPresence(); });
+audio.addEventListener("pause", () => { collectRewardTime(); updatePlayerChrome(); publishPresence(); });
 audio.addEventListener("ended", () => { if (!state.repeat) playNext(); });
 audio.addEventListener("error", () => toast("Playback failed. Check your connection and try again.", "error"));
 audio.addEventListener("loadedmetadata", () => { if (state.active && audio.duration > 0 && !state.active.duration) { state.active.duration = Math.round(audio.duration); void api(`/api/music/${encodeURIComponent(state.active.id)}/duration`, { method: "PATCH", body: { duration: state.active.duration } }).catch(() => undefined); } });

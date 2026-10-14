@@ -102,6 +102,7 @@ const realAuth = load("apps/api/src/middleware/auth.ts", { "../env.js": { env },
 const auth = { requireRank: realAuth.requireRank, signToken: realAuth.signToken, authenticate: (req, res, next) => { if (!req.headers.authorization) return res.status(401).json({ error: "Authentication required" }); req.auth = { userId: actor.id, rank: actor.rank, isOwner: !!actor.isOwner }; next(); } };
 const errors = load("apps/api/src/middleware/errors.ts", { "../services/logging.js": { audit: async () => {} } });
 const catalog = load("apps/api/src/services/catalog.ts", { "../env.js": { env } });
+const listeningRewards = load("apps/api/src/services/listeningRewards.ts");
 let detector = async () => null;
 const storageMock = {
   beginDirectUpload: async (category, userId, contentType, size) => {
@@ -135,7 +136,7 @@ const normalizeIdentity = (title, artist) => ({
   normalizedTitle: String(title ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, ""),
   normalizedArtist: String(artist ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "")
 });
-const mocks = { "../db.js": { prisma: db }, "../middleware/auth.js": auth, "../middleware/errors.js": errors, "../env.js": { env }, "../services/catalog.js": catalog, "../services/logging.js": { audit: async () => {} }, "../services/realtime.js": { notifyUser: () => {}, publishListening: () => {} }, "../services/notifications.js": { createUserNotification: async () => {}, createBroadcastNotification: async () => {} }, "../services/musicIdentity.js": { musicIdentity: normalizeIdentity }, "../services/staffPlaylist.js": { isStaff: (rank, isOwner) => isOwner || ["Moderator", "Admin", "Developer"].includes(rank), addSongToStaffPlaylist: async () => {} }, "../services/storage.js": storageMock, "../services/spotify.js": {
+const mocks = { "../db.js": { prisma: db }, "../middleware/auth.js": auth, "../middleware/errors.js": errors, "../env.js": { env }, "../services/catalog.js": catalog, "../services/listeningRewards.js": listeningRewards, "../services/logging.js": { audit: async () => {} }, "../services/realtime.js": { notifyUser: () => {}, publishListening: () => {} }, "../services/notifications.js": { createUserNotification: async () => {}, createBroadcastNotification: async () => {} }, "../services/musicIdentity.js": { musicIdentity: normalizeIdentity }, "../services/staffPlaylist.js": { isStaff: (rank, isOwner) => isOwner || ["Moderator", "Admin", "Developer"].includes(rank), addSongToStaffPlaylist: async () => {} }, "../services/storage.js": storageMock, "../services/spotify.js": {
   canonicalSpotifyTrackUrl: url => url.protocol === "https:" && url.hostname === "open.spotify.com" && /^\/track\/[A-Za-z0-9]{22}$/.test(url.pathname) ? `https://open.spotify.com${url.pathname}` : null,
   spotifyTrackMetadata: async () => ({ title: "Spotify test track", artworkUrl: "https://i.scdn.co/image/test" })
 }, "file-type": { fileTypeFromBuffer: buffer => detector(buffer) } };

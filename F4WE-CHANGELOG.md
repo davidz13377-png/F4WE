@@ -2,6 +2,31 @@
 
 Ettől a verziótól minden kiadás változásai ebbe a fájlba kerülnek. Az alkalmazásban megjelenő update szöveghez a **Public release notes** rész használható. A kizárólag staff/owner vagy technikai változások külön részben szerepelnek.
 
+## 1.4.0 – 2026-10-15
+
+### Public release notes
+
+- Recently Played is now stored separately for every account on the same Windows device.
+- Fixed playback interruptions when changing songs quickly.
+- Added Windows taskbar preview controls for Like, Previous, Play/Pause and Next.
+- Artist pages now support large profile banners.
+- Updated About F4WE with application ownership information.
+- Listening reward timing is now based on real playback time, and duplicate reward popups are prevented.
+- Removing a profile design now restores the normal avatar cleanly.
+
+### Staff and owner tools
+
+- Staff can edit artist names, biographies, portraits and banners directly from artist pages.
+- Staff can edit album artist, title, type, release date, description, artwork and track list directly from album pages.
+- Album track selection now searches the complete music catalog by song title or artist name.
+- Changing the reward interval safely resets partial progress so rewards remain exact.
+
+### Platform and technical changes
+
+- Added protected full-catalog loading for staff album management.
+- Added race-safe desktop playback requests and taskbar IPC controls.
+- Windows app version: `1.4.0`
+
 ## 1.3.0 – 2026-10-11
 
 ### Public release notes

@@ -12,6 +12,14 @@ contextBridge.exposeInMainWorld("f4we", {
   windowControl: action => ipcRenderer.invoke("window:control", action),
   openExternal: url => ipcRenderer.invoke("shell:open", url),
   copyText: value => clipboard.writeText(String(value)),
+  mediaControls: {
+    update: value => ipcRenderer.send("media:update", value),
+    onAction(callback) {
+      const listener = (_event, action) => callback(action);
+      ipcRenderer.on("media:action", listener);
+      return () => ipcRenderer.off("media:action", listener);
+    }
+  },
   presence: {
     connect(apiUrl, token) {
       if (socket) socket.disconnect();

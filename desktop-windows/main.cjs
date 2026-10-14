@@ -1,11 +1,30 @@
-const { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, shell } = require("electron");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 const API_URL = (process.env.F4WE_API_URL || "https://f4we-api-production.up.railway.app").replace(/\/+$/, "");
 let authToken = "";
 let mainWindow;
+let mediaPlaying = false;
+
+function taskbarIcon(name) {
+  return nativeImage.createFromPath(path.join(__dirname, "resources", "taskbar", `${name}.png`));
+}
+
+function updateTaskbarControls(enabled = true) {
+  if (process.platform !== "win32" || !mainWindow || mainWindow.isDestroyed()) return;
+  if (!enabled) {
+    mainWindow.setThumbarButtons([]);
+    return;
+  }
+  mainWindow.setThumbarButtons([
+    { tooltip: "Like / unlike", icon: taskbarIcon("heart"), click: () => mainWindow?.webContents.send("media:action", "like") },
+    { tooltip: "Previous", icon: taskbarIcon("previous"), click: () => mainWindow?.webContents.send("media:action", "previous") },
+    { tooltip: mediaPlaying ? "Pause" : "Play", icon: taskbarIcon(mediaPlaying ? "pause" : "play"), click: () => mainWindow?.webContents.send("media:action", "toggle") },
+    { tooltip: "Next", icon: taskbarIcon("next"), click: () => mainWindow?.webContents.send("media:action", "next") }
+  ]);
+}
 
 protocol.registerSchemesAsPrivileged([{ scheme: "f4we-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
@@ -72,6 +91,7 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
+    updateTaskbarControls(false);
     if (process.env.F4WE_SCREENSHOT_PATH) setTimeout(async () => {
       const capture = await mainWindow.webContents.capturePage();
       await fs.writeFile(process.env.F4WE_SCREENSHOT_PATH, capture.toPNG());
@@ -106,6 +126,10 @@ app.whenReady().then(() => {
     if (action === "minimize") mainWindow.minimize();
     if (action === "maximize") mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
     if (action === "close") mainWindow.close();
+  });
+  ipcMain.on("media:update", (_event, value) => {
+    mediaPlaying = !!value?.playing;
+    updateTaskbarControls(!!value?.active);
   });
   ipcMain.handle("shell:open", (_event, url) => /^https:\/\//i.test(url) ? shell.openExternal(url) : false);
   createWindow();

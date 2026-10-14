@@ -13,6 +13,7 @@ import { songView } from "../services/catalog.js";
 import { beginDirectUpload, completeDirectUpload, cutMusic, deleteImage, deleteMusic, mp3DurationSeconds, openMusic, saveImage, saveMusic, storedMusicName } from "../services/storage.js";
 import { addSongToStaffPlaylist } from "../services/staffPlaylist.js";
 import { musicIdentity } from "../services/musicIdentity.js";
+import { advanceListeningReward, verifiedListeningSeconds } from "../services/listeningRewards.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_MP3_MB * 1024 * 1024, files: 1 } });
@@ -324,22 +325,22 @@ router.patch("/:id/play/:playId", asyncRoute(async (req, res) => {
     const latest = await tx.musicPlay.findFirst({ where: { userId }, orderBy: [{ playedAt: "desc" }, { id: "desc" }], select: { id: true } });
     if (latest?.id !== play.id) return null;
     const now = new Date();
-    const elapsed = Math.max(0, Math.floor((now.getTime() - (play.lastHeartbeatAt ?? play.playedAt).getTime()) / 1000));
-    const credited = Math.min(seconds, Math.max(0, elapsed + 2), 600);
+    const elapsedMilliseconds = Math.max(0, now.getTime() - (play.lastHeartbeatAt ?? play.playedAt).getTime());
+    const credited = verifiedListeningSeconds(seconds, elapsedMilliseconds);
     await tx.musicPlay.update({ where: { id: play.id }, data: { listenedSeconds: { increment: credited }, lastHeartbeatAt: now } });
-    if (!credited) return { granted: 0, coins: null };
+    if (!credited) return { granted: 0, coins: null, eventId: null };
     await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
     const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { rewardSeconds: true, coins: true } });
-    const accumulated = user.rewardSeconds + credited;
-    const grants = Math.floor(accumulated / interval);
-    const granted = grants * coinAmount;
-    const updated = await tx.user.update({ where: { id: userId }, data: { rewardSeconds: accumulated % interval, ...(granted ? { coins: { increment: granted } } : {}) }, select: { coins: true } });
-    if (granted) await tx.coinTransaction.create({ data: { userId, amount: granted, reason: "listening.reward" } });
-    return { granted, coins: updated.coins };
+    const progress = advanceListeningReward(user.rewardSeconds, credited, interval, coinAmount);
+    const updated = await tx.user.update({ where: { id: userId }, data: { rewardSeconds: progress.remainingSeconds, ...(progress.grantedCoins ? { coins: { increment: progress.grantedCoins } } : {}) }, select: { coins: true } });
+    const transaction = progress.grantedCoins
+      ? await tx.coinTransaction.create({ data: { userId, amount: progress.grantedCoins, reason: "listening.reward" }, select: { id: true } })
+      : null;
+    return { granted: progress.grantedCoins, coins: updated.coins, eventId: transaction?.id ?? null };
   });
   if (!reward) return res.status(404).json({ error: "Listening session not found" });
   if (reward.granted && reward.coins !== null) {
-    notifyUser(userId, "coinsChanged", { coins: reward.coins, granted: reward.granted });
+    notifyUser(userId, "coinsChanged", { coins: reward.coins, granted: reward.granted, eventId: reward.eventId });
   }
   res.status(204).end();
 }));

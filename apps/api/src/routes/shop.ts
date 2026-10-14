@@ -167,11 +167,16 @@ router.patch("/owner/products/:key", ownerOnly, asyncRoute(async (req, res) => {
 
 router.patch("/owner/reward-settings", ownerOnly, asyncRoute(async (req, res) => {
   const value = z.object({ intervalMinutes: z.number().int().min(1).max(1440), coinAmount: z.number().int().min(1).max(10_000) }).strict().parse(req.body);
-  await prisma.$transaction([
-    prisma.systemSetting.upsert({ where: { key: "reward.interval_seconds" }, create: { key: "reward.interval_seconds", value: String(value.intervalMinutes * 60) }, update: { value: String(value.intervalMinutes * 60) } }),
-    prisma.systemSetting.upsert({ where: { key: "reward.coin_amount" }, create: { key: "reward.coin_amount", value: String(value.coinAmount) }, update: { value: String(value.coinAmount) } })
-  ]);
-  res.json({ intervalSeconds: value.intervalMinutes * 60, coinAmount: value.coinAmount });
+  const intervalSeconds = value.intervalMinutes * 60;
+  await prisma.$transaction(async tx => {
+    const previous = await tx.systemSetting.findUnique({ where: { key: "reward.interval_seconds" }, select: { value: true } });
+    await tx.systemSetting.upsert({ where: { key: "reward.interval_seconds" }, create: { key: "reward.interval_seconds", value: String(intervalSeconds) }, update: { value: String(intervalSeconds) } });
+    await tx.systemSetting.upsert({ where: { key: "reward.coin_amount" }, create: { key: "reward.coin_amount", value: String(value.coinAmount) }, update: { value: String(value.coinAmount) } });
+    // Partial progress belongs to the interval that created it. Resetting it
+    // prevents a settings change from granting coins early or much too late.
+    if (previous && Number(previous.value) !== intervalSeconds) await tx.user.updateMany({ data: { rewardSeconds: 0 } });
+  });
+  res.json({ intervalSeconds, coinAmount: value.coinAmount });
 }));
 
 router.post("/owner/designs/upload-url", ownerOnly, asyncRoute(async (req, res) => {

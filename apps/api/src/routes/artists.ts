@@ -21,7 +21,8 @@ const artistInput = z.object({
   name: z.string().trim().min(1).max(120),
   bio: z.string().trim().max(2_000).nullable().optional(),
   imageUrl: z.string().url().max(2_000).nullable().optional(),
-  heroUrl: z.string().url().max(2_000).nullable().optional()
+  heroUrl: z.string().url().max(2_000).nullable().optional(),
+  verified: z.boolean().optional()
 }).strict();
 const releaseInput = z.object({
   title: z.string().trim().min(1).max(150),
@@ -32,6 +33,7 @@ const releaseInput = z.object({
   songIds: z.array(z.string().min(1).max(100)).max(200).default([])
 }).strict();
 const releasePatchInput = z.object({
+  artistId: z.string().min(1).max(100).optional(),
   title: z.string().trim().min(1).max(150).optional(),
   description: z.string().trim().max(2_000).nullable().optional(),
   artworkUrl: z.string().url().max(2_000).nullable().optional(),
@@ -95,6 +97,16 @@ router.get("/releases", asyncRoute(async (req, res) => {
   res.json(releases.map(({ _count, ...release }) => ({ ...release, trackCount: _count.tracks })));
 }));
 
+router.get("/manage/songs", staff, asyncRoute(async (req, res) => {
+  const q = z.string().trim().max(100).catch("").parse(req.query.q ?? "");
+  const music = await prisma.music.findMany({
+    where: q ? { OR: [{ title: { contains: q, mode: "insensitive" } }, { artist: { contains: q, mode: "insensitive" } }] } : undefined,
+    orderBy: [{ artist: "asc" }, { title: "asc" }, { uploadDate: "desc" }],
+    include: { favorites: { where: { userId: req.auth!.userId }, select: { userId: true } } }
+  });
+  res.json(music.map(songView));
+}));
+
 router.get("/releases/:releaseId", asyncRoute(async (req, res) => {
   const release = await releaseView(req.params.releaseId as string, req.auth!.userId);
   if (!release) return res.status(404).json({ error: "Album not found" });
@@ -138,7 +150,7 @@ router.post("/", staff, asyncRoute(async (req, res) => {
   if (await prisma.catalogArtist.findUnique({ where: { normalizedName }, select: { id: true } })) return res.status(409).json({ error: "This artist already exists" });
   const artist = await prisma.catalogArtist.create({ data: {
     name: input.name, normalizedName, bio: input.bio || null, imageUrl: input.imageUrl || null,
-    heroUrl: input.heroUrl || null, createdById: req.auth!.userId
+    heroUrl: input.heroUrl || null, verified: input.verified ?? true, createdById: req.auth!.userId
   } });
   await audit("MUSIC_UPLOAD", req.auth!.userId, "catalog.artist_created", { artistId: artist.id, name: artist.name });
   res.status(201).json(artist);
@@ -151,7 +163,7 @@ router.patch("/:id", staff, asyncRoute(async (req, res) => {
   const normalizedName = input.name === undefined ? undefined : normalize(input.name);
   if (normalizedName && await prisma.catalogArtist.findFirst({ where: { normalizedName, id: { not: current.id } }, select: { id: true } })) return res.status(409).json({ error: "This artist already exists" });
   const artist = await prisma.catalogArtist.update({ where: { id: current.id }, data: {
-    name: input.name, normalizedName, bio: input.bio, imageUrl: input.imageUrl, heroUrl: input.heroUrl
+    name: input.name, normalizedName, bio: input.bio, imageUrl: input.imageUrl, heroUrl: input.heroUrl, verified: input.verified
   } });
   if (input.imageUrl !== undefined && input.imageUrl !== current.imageUrl) await deleteImage(current.imageUrl, "artist");
   if (input.heroUrl !== undefined && input.heroUrl !== current.heroUrl) await deleteImage(current.heroUrl, "artist");
@@ -197,18 +209,20 @@ router.patch("/releases/:releaseId", staff, asyncRoute(async (req, res) => {
   if (!current) return res.status(404).json({ error: "Album not found" });
   if (input.songIds && new Set(input.songIds).size !== input.songIds.length) return res.status(400).json({ error: "The album track list contains duplicates" });
   if (input.songIds && await prisma.music.count({ where: { id: { in: input.songIds } } }) !== input.songIds.length) return res.status(400).json({ error: "One or more selected songs no longer exist" });
-  const normalizedTitle = input.title === undefined ? undefined : normalize(input.title);
-  if (normalizedTitle && await prisma.catalogRelease.findFirst({ where: { artistId: current.artistId, normalizedTitle, id: { not: current.id } }, select: { id: true } })) return res.status(409).json({ error: "This artist already has an album with that title" });
+  const targetArtistId = input.artistId ?? current.artistId;
+  if (input.artistId && !await prisma.catalogArtist.findUnique({ where: { id: input.artistId }, select: { id: true } })) return res.status(404).json({ error: "Artist not found" });
+  const normalizedTitle = input.title === undefined ? current.normalizedTitle : normalize(input.title);
+  if ((input.title !== undefined || input.artistId !== undefined) && await prisma.catalogRelease.findFirst({ where: { artistId: targetArtistId, normalizedTitle, id: { not: current.id } }, select: { id: true } })) return res.status(409).json({ error: "This artist already has an album with that title" });
   await prisma.$transaction(async tx => {
     if (input.songIds) {
       await tx.catalogReleaseTrack.deleteMany({ where: { releaseId: current.id } });
       if (input.songIds.length) {
         await tx.catalogReleaseTrack.createMany({ data: input.songIds.map((musicId, order) => ({ releaseId: current.id, musicId, order })) });
-        await tx.music.updateMany({ where: { id: { in: input.songIds } }, data: { catalogArtistId: current.artistId } });
+        await tx.music.updateMany({ where: { id: { in: input.songIds } }, data: { catalogArtistId: targetArtistId } });
       }
     }
     await tx.catalogRelease.update({ where: { id: current.id }, data: {
-      title: input.title, normalizedTitle, description: input.description, artworkUrl: input.artworkUrl,
+      artistId: input.artistId, title: input.title, normalizedTitle: input.title === undefined ? undefined : normalizedTitle, description: input.description, artworkUrl: input.artworkUrl,
       releaseDate: releaseDate(input.releaseDate), type: input.type
     } });
   });

@@ -24,7 +24,7 @@ assert.match(routes, /router\.get\("\/releases"/);
 assert.match(app, /app\.use\("\/api\/artists", artistRoutes\)/);
 assert.match(storage, /"artist" \| "release-artwork"/);
 
-assert.equal(desktopPackage.version, "1.3.0");
+assert.equal(desktopPackage.version, "1.4.0");
 assert.equal(desktopPackage.build.appId, "com.musicbox.desktop");
 assert.deepEqual(desktopPackage.build.win.target.map(item => item.target), ["nsis", "portable"]);
 assert.match(main, /protocol\.handle\("f4we-media"/);
@@ -34,6 +34,8 @@ assert.match(main, /contextIsolation: true/);
 assert.match(main, /nodeIntegration: false/);
 assert.doesNotMatch(main, /webSecurity:\s*false/);
 assert.match(preload, /contextBridge\.exposeInMainWorld\("f4we"/);
+assert.match(main, /setThumbarButtons/);
+assert.match(preload, /mediaControls/);
 assert.match(renderer, /Add artist/);
 assert.match(renderer, /Add album/);
 assert.match(renderer, /Friends Activity|friends-activity/i);
@@ -53,6 +55,15 @@ assert.match(renderer, /profileDesignUrl/);
 assert.match(renderer, /profileDesignUrl \? "has-frame" : "no-frame"/);
 assert.match(renderer, /home-rotation/);
 assert.match(renderer, /The latest F4WE API is not online yet/);
+assert.match(renderer, /f4we\.recent\.\$\{state\.user\.id\}/);
+assert.doesNotMatch(renderer, /localStorage\.getItem\("f4we\.recent"\)/);
+assert.match(renderer, /playbackRequest/);
+assert.match(renderer, /interrupted by a new load request/);
+assert.match(renderer, /Edit artist/);
+assert.match(renderer, /Edit album/);
+assert.match(renderer, /Choose artist banner/);
+assert.match(renderer, /Search by song or artist/);
+assert.match(renderer, /This app is Owned By notxenom1/);
 assert.match(html, /data-view="settings"/);
 assert.match(html, /id="icon-home"/);
 assert.match(html, /id="icon-pause"[\s\S]*?M7 5h4v14H7z/);
@@ -72,6 +83,8 @@ assert.match(css, /\.profile-avatar-hero\.has-frame\{--frame-size:150\.8px;--ava
 assert.doesNotMatch(css, /translate\(-13%,-18%\)/);
 assert.match(css, /\.song-duration\{text-align:center\}/);
 assert.match(css, /#play-button \.icon\{[\s\S]*?fill:currentColor!important/);
+assert.match(css, /artist-hero-bg/);
+assert.match(css, /avatar-frame\.hidden\{display:none!important/);
 assert.match(css, /--accent:#f2f2f3/);
 
 for (const asset of ["desktop-windows/resources/icon.ico", "desktop-windows/resources/icon.png", "desktop-windows/renderer/assets/featured-eclipse.png", "desktop-windows/renderer/assets/f4we-icon.png"]) {
