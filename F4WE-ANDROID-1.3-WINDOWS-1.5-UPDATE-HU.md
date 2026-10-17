@@ -7,6 +7,7 @@
 - Új **Notification Send** Owner Portal funkció külön címmel, üzenettel és platformválasztással.
 - Az owner üzenet belépéskor jelenik meg, kiírja a küldő owner nevét, és az OK megnyomásáig nem zárható be.
 - A Windows Activity oldalon teljes Music Request, Bug Report és Update Idea rendszer, saját beküldések törlésével.
+- A Windows Rotation és Recently Played teljesen fiókonként külön működik; üres tesztfióknál nem jelennek meg nem hallgatott helyettesítő zenék.
 - Androidon a bejelentkezett session nem vész el egy átmeneti maintenance válasz miatt.
 
 ## Telepítés, ellenőrzés és push

@@ -8,6 +8,7 @@ Ettől a verziótól minden kiadás változásai ebbe a fájlba kerülnek. Az al
 
 - Music Requests, Bug Reports and Update Ideas are now fully available in the Windows app.
 - Windows users can review and delete their own submitted requests, reports and ideas.
+- Fixed Windows Rotation and Recently Played so a new or switched account never receives placeholder songs it has not listened to.
 - Added reliable full-screen maintenance notices to Windows and improved Android maintenance handling.
 - Added one-time F4WE messages with a title, message and the sending owner's name.
 

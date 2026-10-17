@@ -12,9 +12,15 @@ const css = read("desktop-windows/renderer/styles.css");
 const html = read("desktop-windows/renderer/index.html");
 const shop = read("apps/api/src/routes/shop.ts");
 const mobilePlayer = read("apps/mobile/src/context/PlayerContext.tsx");
+const musicRoutes = read("apps/api/src/routes/music.ts");
 
 assert.match(renderer, /`f4we\.recent\.\$\{state\.user\.id\}`/);
 assert.doesNotMatch(renderer, /localStorage\.(?:getItem|setItem)\("f4we\.recent"/);
+assert.match(renderer, /function resetAccountState\(\)/);
+assert.match(renderer, /if \(state\.user\?\.id !== result\.user\.id\) resetAccountState\(\)/);
+assert.doesNotMatch(renderer, /state\.rotation\.length \? state\.rotation : state\.songs\.slice/);
+assert.doesNotMatch(renderer, /recent\.length \? recent : state\.songs\.slice/);
+assert.match(musicRoutes, /where: \{ userId: req\.auth!\.userId, playedAt: \{ gte: weekStart \} \}/);
 assert.match(renderer, /const requestId = \+\+state\.playbackRequest/);
 assert.match(renderer, /error\?\.name === "AbortError"/);
 assert.match(renderer, /Edit artist/);

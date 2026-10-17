@@ -131,11 +131,18 @@ function updateUserChrome() {
   $("#sidebar-rank").textContent = userRank();
 }
 
+function resetAccountState() {
+  for (const key of ["songs", "playlists", "favorites", "friends", "artists", "releases", "rotation", "notifications", "queue", "listeningFollowers", "pendingAnnouncements", "catalogSongs"]) state[key] = [];
+  for (const key of ["featured", "homeRotation", "homeRecent", "homeFeatured", "searchSongs", "openPlaylist", "openArtist", "openRelease", "friendCharts", "recapSongs"]) state[key] = null;
+  state.queueIndex = -1; state.followingId = null; state.lastCoinEvent = null;
+}
+
 async function authenticate(mode, form) {
   const values = Object.fromEntries(new FormData(form));
   $("#auth-error").textContent = "";
   try {
     const result = await api(`/api/auth/${mode}`, { method: "POST", body: values });
+    if (state.user?.id !== result.user.id) resetAccountState();
     await setToken(result.token); state.user = result.user; await enterApp();
   } catch (error) { $("#auth-error").textContent = error.message; }
 }
@@ -153,6 +160,9 @@ async function enterApp() {
 }
 
 async function loadCore() {
+  // Never keep another account's data if one of the new account's requests fails.
+  for (const key of ["songs", "playlists", "favorites", "friends", "artists", "releases", "rotation", "notifications"]) state[key] = [];
+  state.featured = null;
   const calls = await Promise.allSettled([
     api("/api/music"), api("/api/playlists?library=true"), api("/api/music/favorites"), api("/api/friends"),
     api("/api/artists"), api("/api/artists/releases"), api("/api/music/rotation"), api("/api/artists/featured"), api("/api/profile/notifications")
@@ -198,6 +208,7 @@ function connectPresence() {
 
 function logout(showMessage = true) {
   state.playbackRequest++; void stopHeartbeat(false); audio.pause(); audio.removeAttribute("src"); state.user = null; state.active = null;
+  resetAccountState();
   state.presenceCleanup.forEach(cleanup => cleanup()); state.presenceCleanup = [];
   window.f4we.mediaControls?.update({ active: false, playing: false });
   window.f4we.presence.disconnect(); void setToken("");
@@ -263,10 +274,10 @@ function rememberRecent(songId) {
 function renderHome() {
   const featured = state.featured;
   const featuredSongs = featured ? state.songs.filter(song => featured.tracks?.some?.(track => track.id === song.id)) : state.songs;
-  const recommended = state.rotation.length ? state.rotation : state.songs.slice(0, 6);
+  const recommended = state.rotation;
   const recent = recentSongs();
   state.homeRotation = recommended;
-  state.homeRecent = recent.length ? recent : state.songs.slice(6, 12);
+  state.homeRecent = recent;
   state.homeFeatured = featuredSongs.length ? featuredSongs : state.songs;
   $("#view").innerHTML = `<section class="hero">
     <img class="hero-bg" src="${heroArt}" alt="F4WE Eclipse of Sound">
@@ -276,7 +287,7 @@ function renderHome() {
   </section>
   ${state.listeningFollowers.length ? `<section class="surface"><h3>Listening with you</h3><p>${state.listeningFollowers.map(item => safe(item.username)).join(", ")} ${state.listeningFollowers.length === 1 ? "is" : "are"} synced to your music.</p></section>` : ""}
   <section class="section"><div class="section-head"><div><p class="section-kicker">CURATED FOR YOU</p><h2>Your Rotation This Week</h2></div><button data-view="search">View all</button></div><div class="row-cards">${recommended.slice(0, 6).map(item => mediaCard(item, "song", "home-rotation")).join("") || '<div class="empty-state">Start listening to build your rotation.</div>'}</div></section>
-  <section class="section"><div class="section-head"><div><p class="section-kicker">JUMP BACK IN</p><h2>Recently Played</h2></div></div><div class="row-cards">${(recent.length ? recent : state.songs.slice(6, 12)).map(item => mediaCard(item, "song", "home-recent")).join("")}</div></section>
+  <section class="section"><div class="section-head"><div><p class="section-kicker">JUMP BACK IN</p><h2>Recently Played</h2></div></div><div class="row-cards">${recent.map(item => mediaCard(item, "song", "home-recent")).join("") || '<div class="empty-state">Your recently played songs will appear here.</div>'}</div></section>
   <section class="section"><div class="section-head"><div><p class="section-kicker">DISCOVER</p><h2>Artists on F4WE</h2></div><button data-view="artists">View all</button></div><div class="row-cards">${state.artists.slice(0, 6).map(item => mediaCard(item, "artist")).join("") || '<div class="empty-state">Artists added by staff will appear here.</div>'}</div></section>`;
 }
 
