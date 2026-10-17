@@ -17,6 +17,7 @@ npm --workspace @music-box/api run typecheck
 npm --workspace @music-box/mobile run typecheck
 node tests\f4we-windows-app.cjs
 node tests\f4we-windows-1.4-update.cjs
+node tests\f4we-platform-controls-update.cjs
 
 git add -A
 git commit -m "Add F4WE Windows app and artist albums"
@@ -59,7 +60,7 @@ npm run build:windows
 A kész fájlok itt jelennek meg:
 
 ```text
-C:\mb\desktop-windows\release\F4WE-Windows-1.4.0-x64.exe
+C:\mb\desktop-windows\release\F4WE-Windows-1.5.0-x64.exe
 ```
 
 A mappában lesz egy telepítős NSIS változat és egy portable EXE is. A telepítő létrehozhat asztali és Start menü parancsikont.

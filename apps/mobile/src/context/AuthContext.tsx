@@ -15,6 +15,7 @@ type AuthValue = {
 };
 const AuthContext = createContext<AuthValue | null>(null);
 const TOKEN_KEY = "music-box-session";
+const USER_KEY = "music-box-session-user";
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<User | null>(null);
@@ -24,15 +25,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const saveSession = async (value: { token: string; user: User }) => {
     setApiToken(value.token); setToken(value.token); setUser(value.user);
-    await SecureStore.setItemAsync(TOKEN_KEY, value.token);
+    await Promise.all([SecureStore.setItemAsync(TOKEN_KEY, value.token), SecureStore.setItemAsync(USER_KEY, JSON.stringify(value.user))]);
   };
   const refresh = async () => {
     const result = await api<{ user: User; refreshedToken: string }>("/api/profile/me");
     await saveSession({ token: result.refreshedToken, user: result.user });
   };
   useEffect(() => { void (async () => {
-    const saved = await SecureStore.getItemAsync(TOKEN_KEY);
-    if (saved) { setApiToken(saved); setToken(saved); try { await refresh(); } catch { await SecureStore.deleteItemAsync(TOKEN_KEY); setApiToken(null); } }
+    const [saved, savedUser] = await Promise.all([SecureStore.getItemAsync(TOKEN_KEY), SecureStore.getItemAsync(USER_KEY)]);
+    if (saved) {
+      setApiToken(saved); setToken(saved);
+      if (savedUser) { try { setUser(JSON.parse(savedUser) as User); } catch { /* Refresh replaces invalid cached data. */ } }
+      try { await refresh(); } catch (error) {
+        if ((error as { status?: number }).status === 401) { await Promise.all([SecureStore.deleteItemAsync(TOKEN_KEY), SecureStore.deleteItemAsync(USER_KEY)]); setApiToken(null); setToken(null); setUser(null); }
+      }
+    }
     setLoading(false);
   })(); }, []);
   useEffect(() => {
@@ -49,7 +56,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const login = async (username: string, password: string) => saveSession(await api("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }));
   const register = async (username: string, password: string, accessKey: string) => saveSession(await api("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password, accessKey }) }));
-  const logout = async () => { await SecureStore.deleteItemAsync(TOKEN_KEY); setApiToken(null); setToken(null); setUser(null); };
+  const logout = async () => { await Promise.all([SecureStore.deleteItemAsync(TOKEN_KEY), SecureStore.deleteItemAsync(USER_KEY)]); setApiToken(null); setToken(null); setUser(null); };
 
   return <AuthContext.Provider value={useMemo(() => ({ user, token, loading, socket, login, register, logout, refresh }), [user, token, loading, socket])}>{children}</AuthContext.Provider>;
 }

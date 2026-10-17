@@ -2,7 +2,7 @@ const { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, shell }
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.5.0";
 const API_URL = (process.env.F4WE_API_URL || "https://f4we-api-production.up.railway.app").replace(/\/+$/, "");
 let authToken = "";
 let mainWindow;
@@ -29,7 +29,7 @@ function updateTaskbarControls(enabled = true) {
 protocol.registerSchemesAsPrivileged([{ scheme: "f4we-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
 
 function requestHeaders(extra = {}) {
-  return { "X-F4WE-Version": APP_VERSION, ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...extra };
+  return { "X-F4WE-Version": APP_VERSION, "X-F4WE-Platform": "windows", ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...extra };
 }
 
 async function apiRequest({ route, method = "GET", body, headers = {} }) {

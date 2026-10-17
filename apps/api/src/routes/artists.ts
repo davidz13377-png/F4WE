@@ -175,7 +175,7 @@ router.delete("/:id", staff, asyncRoute(async (req, res) => {
   const artist = await prisma.catalogArtist.findUnique({ where: { id: req.params.id as string }, include: { releases: { select: { artworkUrl: true } } } });
   if (!artist) return res.status(404).json({ error: "Artist not found" });
   await prisma.catalogArtist.delete({ where: { id: artist.id } });
-  await Promise.all([deleteImage(artist.imageUrl, "artist"), deleteImage(artist.heroUrl, "artist"), ...artist.releases.map(item => deleteImage(item.artworkUrl, "release-artwork"))]);
+  await Promise.allSettled([deleteImage(artist.imageUrl, "artist"), deleteImage(artist.heroUrl, "artist"), ...artist.releases.map(item => deleteImage(item.artworkUrl, "release-artwork"))]);
   await audit("MUSIC_UPLOAD", req.auth!.userId, "catalog.artist_deleted", { artistId: artist.id, name: artist.name });
   res.status(204).end();
 }));
@@ -235,7 +235,7 @@ router.delete("/releases/:releaseId", staff, asyncRoute(async (req, res) => {
   const release = await prisma.catalogRelease.findUnique({ where: { id: req.params.releaseId as string } });
   if (!release) return res.status(404).json({ error: "Album not found" });
   await prisma.catalogRelease.delete({ where: { id: release.id } });
-  await deleteImage(release.artworkUrl, "release-artwork");
+  await Promise.allSettled([deleteImage(release.artworkUrl, "release-artwork")]);
   await audit("MUSIC_UPLOAD", req.auth!.userId, "catalog.release_deleted", { releaseId: release.id, title: release.title });
   res.status(204).end();
 }));

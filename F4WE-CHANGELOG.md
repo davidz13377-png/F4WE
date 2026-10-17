@@ -2,6 +2,29 @@
 
 Ettől a verziótól minden kiadás változásai ebbe a fájlba kerülnek. Az alkalmazásban megjelenő update szöveghez a **Public release notes** rész használható. A kizárólag staff/owner vagy technikai változások külön részben szerepelnek.
 
+## Android 1.3.0 / Windows 1.5.0 – 2026-10-17
+
+### Public release notes
+
+- Music Requests, Bug Reports and Update Ideas are now fully available in the Windows app.
+- Windows users can review and delete their own submitted requests, reports and ideas.
+- Added reliable full-screen maintenance notices to Windows and improved Android maintenance handling.
+- Added one-time F4WE messages with a title, message and the sending owner's name.
+
+### Staff and owner tools
+
+- Maintenance can target Android, Windows 10/11, or both platforms independently.
+- Added **Notification Send** to the Owner Portal with separate title, message and platform selection.
+- Owner messages remain pending per user until the user presses OK.
+
+### Platform and technical changes
+
+- Added durable announcement and per-user dismissal database records.
+- Android and Windows requests now identify their platform to the API, including protected music streams.
+- Android preserves the signed-in user session while the service is temporarily under maintenance.
+- Android app version: `1.3.0` (version code `4`)
+- Windows app version: `1.5.0`
+
 ## 1.4.0 – 2026-10-15
 
 ### Public release notes
@@ -25,6 +48,9 @@ Ettől a verziótól minden kiadás változásai ebbe a fájlba kerülnek. Az al
 
 - Added protected full-catalog loading for staff album management.
 - Added race-safe desktop playback requests and taskbar IPC controls.
+- Staff can delete artists and albums without deleting their music files.
+- Merged the native Windows title controls into the application header and removed the duplicate small F4WE label.
+- Increased desktop typography throughout navigation, settings, catalog, friends and player views.
 - Windows app version: `1.4.0`
 
 ## 1.3.0 – 2026-10-11

@@ -6,6 +6,9 @@
 - Stabil számváltás gyors kattintásoknál, a megszakított `play()` hiba nélkül.
 - Windows tálcás mini vezérlők: Like, előző, Play/Pause és következő.
 - Staff artist- és albumszerkesztés közvetlenül az adatlapokról.
+- Staff artist- és albumtörlés megerősítéssel; a zenefájlok törléskor is megmaradnak.
+- A külön felső címsor összeolvadt az alkalmazás fejlécével, a felesleges kis F4WE felirat nélkül.
+- Megnövelt, egységesen olvasható Windows-betűméretek minden oldalon.
 - Artist banner feltöltés és profiloldali megjelenítés.
 - Teljes, címre és előadóra kereshető zenelista az albumokhoz.
 - Pontosabb hallgatási jutalom-időzítés és egyszeri coin visszajelzés.

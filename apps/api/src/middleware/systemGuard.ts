@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { prisma } from "../db.js";
 import { env } from "../env.js";
 
-let cached: { expires: number; minimumVersion: string; maintenanceEnabled: boolean; maintenanceMessage: string; updateMessage: string } | null = null;
+let cached: { expires: number; minimumVersion: string; maintenanceEnabled: boolean; maintenanceAndroid: boolean; maintenanceWindows: boolean; maintenanceMessage: string; updateMessage: string } | null = null;
 
 function olderThan(current: string, minimum: string) {
   const parse = (value: string) => value.split(/[.+-]/).slice(0, 3).map(part => Number(part) || 0);
@@ -14,12 +14,14 @@ function olderThan(current: string, minimum: string) {
 
 async function settings() {
   if (cached && cached.expires > Date.now()) return cached;
-  const rows = await prisma.systemSetting.findMany({ where: { key: { in: ["app.minimum_version", "app.update_message", "app.maintenance_enabled", "app.maintenance_message"] } } });
+  const rows = await prisma.systemSetting.findMany({ where: { key: { in: ["app.minimum_version", "app.update_message", "app.maintenance_enabled", "app.maintenance_message", "app.maintenance_android", "app.maintenance_windows"] } } });
   const map = new Map(rows.map(row => [row.key, row.value]));
   cached = {
     expires: Date.now() + 5_000,
     minimumVersion: map.get("app.minimum_version") || "1.0.0",
     maintenanceEnabled: map.get("app.maintenance_enabled") === "true",
+    maintenanceAndroid: map.get("app.maintenance_android") !== "false",
+    maintenanceWindows: map.get("app.maintenance_windows") !== "false",
     updateMessage: map.get("app.update_message") || "A new F4WE update is available. Please update the application to continue.",
     maintenanceMessage: map.get("app.maintenance_message") || "F4WE is currently under maintenance. Please try again soon."
   };
@@ -38,7 +40,13 @@ export async function systemGuard(req: Request, res: Response, next: NextFunctio
     // Builds released before version headers existed are the original 1.0.0 APK.
     const version = String(req.headers["x-f4we-version"] || "1.0.0");
     if (!nativeMediaStream && olderThan(version, value.minimumVersion)) return res.status(426).json({ error: value.updateMessage, code: "APP_UPDATE_REQUIRED", minimumVersion: value.minimumVersion, downloadUrl: "https://f4we.xyz/" });
-    if (value.maintenanceEnabled) {
+    const platform = String(req.headers["x-f4we-platform"] || "").toLowerCase();
+    const maintenanceApplies = value.maintenanceEnabled && (
+      platform === "android" ? value.maintenanceAndroid
+        : platform === "windows" ? value.maintenanceWindows
+          : value.maintenanceAndroid || value.maintenanceWindows
+    );
+    if (maintenanceApplies) {
       // Keep login reachable so an Owner can authenticate and turn maintenance off.
       if (req.method === "POST" && req.path === "/auth/login") return next();
       let owner = false;

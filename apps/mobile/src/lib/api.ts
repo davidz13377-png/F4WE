@@ -35,7 +35,10 @@ function responseBody<T>(status: number, body: unknown): T {
       }
     }
     const summary = typeof value?.error === "string" ? value.error : "Request failed";
-    throw new Error([`${summary} (HTTP ${status})`, ...details].join("\n"));
+    const error = new Error([`${summary} (HTTP ${status})`, ...details].join("\n")) as Error & { status: number; details: unknown };
+    error.status = status;
+    error.details = body;
+    throw error;
   }
   return body as T;
 }
@@ -59,7 +62,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const isForm = isFormDataBody(options.body);
   const response = await expoFetch(`${API_URL}${path}`, {
     ...options,
-    headers: { ...(!isForm ? { "Content-Type": "application/json" } : {}), "X-F4WE-Version": APP_VERSION, ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...options.headers }
+    headers: { ...(!isForm ? { "Content-Type": "application/json" } : {}), "X-F4WE-Version": APP_VERSION, "X-F4WE-Platform": "android", ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}), ...options.headers }
   });
   return readResponse<T>(response);
 }

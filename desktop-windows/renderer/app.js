@@ -17,7 +17,7 @@ const state = {
   active: null, queue: [], queueIndex: -1, shuffle: false, repeat: false, playId: null, heartbeat: null,
   playbackRequest: 0, rewardStartedAt: null, rewardPendingMs: 0, presenceCleanup: [], lastCoinEvent: null,
   listeningFollowers: [], followingId: null, selectedArtistImage: null, selectedArtistHero: null, selectedReleaseImage: null,
-  catalogSongs: []
+  catalogSongs: [], modalBlocking: false, maintenanceTimer: null, pendingAnnouncements: []
 };
 
 const audio = new Audio();
@@ -29,8 +29,19 @@ function toast(message, type = "info") {
   $("#toast-stack").append(element); setTimeout(() => element.remove(), 4300);
 }
 
-function showModal(markup) { $("#modal-content").innerHTML = markup; $("#modal").classList.remove("hidden"); }
-function closeModal() { $("#modal").classList.add("hidden"); $("#modal-content").innerHTML = ""; }
+function showModal(markup, blocking = false) {
+  state.modalBlocking = blocking;
+  $("#modal-content").innerHTML = markup;
+  $("#modal .modal-close").classList.toggle("hidden", blocking);
+  $("#modal").classList.remove("hidden");
+}
+function closeModal(force = false) {
+  if (state.modalBlocking && !force) return;
+  state.modalBlocking = false;
+  $("#modal").classList.add("hidden");
+  $("#modal .modal-close").classList.remove("hidden");
+  $("#modal-content").innerHTML = "";
+}
 function uploadError(result, fallback = "Upload failed") {
   if (result?.status === 404 && String(result?.data?.error || "").toLowerCase().includes("route not found")) {
     return "The latest F4WE API is not online yet. Deploy the API update, then try again.";
@@ -46,12 +57,46 @@ async function api(route, options = {}) {
     : typeof result.data?.error === "string" ? result.data.error : `Request failed (HTTP ${result.status})`;
   if (result.status === 401 && state.token) { logout(false); toast(message, "error"); }
   if (result.status === 426) showUpdateRequired(result.data);
+  if (result.status === 503 && result.data?.code === "MAINTENANCE") showMaintenance(result.data);
   const error = new Error(message); error.status = result.status; error.details = result.data; throw error;
 }
 
 function showUpdateRequired(value) {
-  showModal(`<div class="section-kicker">UPDATE REQUIRED</div><h2>A new F4WE version is ready</h2><p>${safe(value?.error || "Please update F4WE to continue.")}</p><button class="primary" id="download-update">Open f4we.xyz</button>`);
+  showModal(`<div class="section-kicker">UPDATE REQUIRED</div><h2>A new F4WE version is ready</h2><p>${safe(value?.error || "Please update F4WE to continue.")}</p><button class="primary" id="download-update">Open f4we.xyz</button>`, true);
   $("#download-update").addEventListener("click", () => window.f4we.openExternal(value?.downloadUrl || "https://f4we.xyz/"));
+}
+
+function showMaintenance(value) {
+  showModal(`<div class="section-kicker">F4WE SYSTEM</div><h2>Maintenance break</h2><p>${safe(value?.error || "F4WE is currently under maintenance. This should not take long.")}</p><div class="maintenance-wait"><span></span>Windows will unlock automatically when maintenance ends.</div>`, true);
+  if (state.maintenanceTimer) return;
+  state.maintenanceTimer = setInterval(async () => {
+    const result = await window.f4we.request("/api/system/status");
+    if (result.ok && !result.data?.maintenanceApplies) {
+      clearInterval(state.maintenanceTimer); state.maintenanceTimer = null; closeModal(true);
+      if (state.token) void enterApp();
+    }
+  }, 10_000);
+}
+
+async function loadOwnerAnnouncements() {
+  if (!state.token || state.modalBlocking) return;
+  try {
+    state.pendingAnnouncements = await api("/api/system/announcements/pending");
+    showNextOwnerAnnouncement();
+  } catch (error) { if (![401, 503].includes(error.status)) console.error(error); }
+}
+
+function showNextOwnerAnnouncement() {
+  const announcement = state.pendingAnnouncements[0];
+  if (!announcement) return closeModal(true);
+  showModal(`<div class="section-kicker">F4WE MESSAGE</div><h2>${safe(announcement.title)}</h2><p class="announcement-body">${safe(announcement.body)}</p><p class="announcement-by">by ${safe(announcement.by)}</p><div class="form-actions"><button class="primary" id="announcement-ok">OK</button></div>`, true);
+  $("#announcement-ok").addEventListener("click", async event => {
+    event.currentTarget.disabled = true;
+    try {
+      await api(`/api/system/announcements/${encodeURIComponent(announcement.id)}/dismiss`, { method: "POST" });
+      state.pendingAnnouncements.shift(); showNextOwnerAnnouncement();
+    } catch (error) { event.currentTarget.disabled = false; toast(error.message, "error"); }
+  });
 }
 
 function setToken(token) {
@@ -101,7 +146,7 @@ async function enterApp() {
   try {
     const profile = await api("/api/profile/me");
     state.user = profile.user; if (profile.refreshedToken) await setToken(profile.refreshedToken); updateUserChrome();
-    await loadCore(); connectPresence(); renderView();
+    await loadCore(); connectPresence(); renderView(); await loadOwnerAnnouncements();
   } catch (error) {
     if (error.status !== 401) { toast(error.message, "error"); renderView(); }
   }
@@ -308,7 +353,7 @@ async function pickCatalogAsset(category, title) {
 
 async function editArtist(artist) {
   let imageUrl = artist.imageUrl || null, heroUrl = artist.heroUrl || null;
-  showModal(`<p class="section-kicker">STAFF CATALOG</p><h2>Edit artist</h2><form id="edit-artist-form"><div class="form-grid"><label class="field">Artist name<input name="name" value="${safe(artist.name)}" maxlength="120" required></label><label class="field full">Biography<textarea name="bio" maxlength="2000">${safe(artist.bio || "")}</textarea></label><label class="check-song full"><input type="checkbox" name="verified" ${artist.verified ? "checked" : ""}> Verified artist</label><button type="button" class="file-picker" id="edit-artist-image">Change artist image</button><button type="button" class="file-picker" id="edit-artist-banner">Change artist banner</button></div><div class="asset-status" id="edit-artist-status">Portrait: ${imageUrl ? "set" : "default"} · Banner: ${heroUrl ? "set" : "none"}</div><div class="form-actions"><button class="primary">Save artist</button><button type="button" class="secondary" id="clear-artist-image">Remove image</button><button type="button" class="secondary" id="clear-artist-banner">Remove banner</button></div></form>`);
+  showModal(`<p class="section-kicker">STAFF CATALOG</p><h2>Edit artist</h2><form id="edit-artist-form"><div class="form-grid"><label class="field">Artist name<input name="name" value="${safe(artist.name)}" maxlength="120" required></label><label class="field full">Biography<textarea name="bio" maxlength="2000">${safe(artist.bio || "")}</textarea></label><label class="check-song full"><input type="checkbox" name="verified" ${artist.verified ? "checked" : ""}> Verified artist</label><button type="button" class="file-picker" id="edit-artist-image">Change artist image</button><button type="button" class="file-picker" id="edit-artist-banner">Change artist banner</button></div><div class="asset-status" id="edit-artist-status">Portrait: ${imageUrl ? "set" : "default"} · Banner: ${heroUrl ? "set" : "none"}</div><div class="form-actions"><button class="primary">Save artist</button><button type="button" class="secondary" id="clear-artist-image">Remove image</button><button type="button" class="secondary" id="clear-artist-banner">Remove banner</button><button type="button" class="danger-button" id="delete-artist">Delete artist</button></div></form>`);
   const status = () => { $("#edit-artist-status").textContent = `Portrait: ${imageUrl ? "set" : "default"} · Banner: ${heroUrl ? "set" : "none"}`; };
   $("#edit-artist-image").addEventListener("click", async () => { const value = await pickCatalogAsset("artist", "Choose artist image"); if (value) { imageUrl = value; status(); } });
   $("#edit-artist-banner").addEventListener("click", async () => { const value = await pickCatalogAsset("artist", "Choose artist banner"); if (value) { heroUrl = value; status(); } });
@@ -321,13 +366,21 @@ async function editArtist(artist) {
       state.artists = await api("/api/artists"); closeModal(); toast("Artist updated"); await openArtist(artist.id);
     } catch (error) { toast(error.message, "error"); }
   });
+  $("#delete-artist").addEventListener("click", async () => {
+    if (!confirm(`Delete ${artist.name} and every album on this artist page? The music files will remain in F4WE.`)) return;
+    try {
+      await api(`/api/artists/${encodeURIComponent(artist.id)}`, { method: "DELETE" });
+      [state.artists, state.releases] = await Promise.all([api("/api/artists"), api("/api/artists/releases")]);
+      state.openArtist = null; closeModal(); toast("Artist deleted"); navigate("artists");
+    } catch (error) { toast(error.message, "error"); }
+  });
 }
 
 async function editRelease(release) {
   let songs;
   try { songs = await loadCatalogSongs(); } catch (error) { toast(error.message, "error"); return; }
   let artworkUrl = release.artworkUrl || null;
-  showModal(`<p class="section-kicker">STAFF CATALOG</p><h2>Edit album</h2><form id="edit-release-form"><div class="form-grid"><label class="field">Artist<select name="artistId" required>${state.artists.map(item => `<option value="${safe(item.id)}" ${item.id === release.artist.id ? "selected" : ""}>${safe(item.name)}</option>`).join("")}</select></label><label class="field">Title<input name="title" value="${safe(release.title)}" maxlength="150" required></label><label class="field">Type<select name="type">${["Album","EP","Single"].map(type => `<option ${release.type === type ? "selected" : ""}>${type}</option>`).join("")}</select></label><label class="field">Release date<input name="releaseDate" type="date" value="${safe(release.releaseDate?.slice(0,10) || "")}"></label><label class="field full">Description<textarea name="description">${safe(release.description || "")}</textarea></label><button type="button" class="file-picker full" id="edit-release-image">Change album cover</button>${trackPickerMarkup(songs, release.tracks.map(song => song.id), "edit-release")}</div><div class="asset-status" id="edit-release-status">Cover: ${artworkUrl ? "set" : "default"}</div><div class="form-actions"><button class="primary">Save album</button><button type="button" class="secondary" id="clear-release-image">Remove cover</button></div></form>`);
+  showModal(`<p class="section-kicker">STAFF CATALOG</p><h2>Edit album</h2><form id="edit-release-form"><div class="form-grid"><label class="field">Artist<select name="artistId" required>${state.artists.map(item => `<option value="${safe(item.id)}" ${item.id === release.artist.id ? "selected" : ""}>${safe(item.name)}</option>`).join("")}</select></label><label class="field">Title<input name="title" value="${safe(release.title)}" maxlength="150" required></label><label class="field">Type<select name="type">${["Album","EP","Single"].map(type => `<option ${release.type === type ? "selected" : ""}>${type}</option>`).join("")}</select></label><label class="field">Release date<input name="releaseDate" type="date" value="${safe(release.releaseDate?.slice(0,10) || "")}"></label><label class="field full">Description<textarea name="description">${safe(release.description || "")}</textarea></label><button type="button" class="file-picker full" id="edit-release-image">Change album cover</button>${trackPickerMarkup(songs, release.tracks.map(song => song.id), "edit-release")}</div><div class="asset-status" id="edit-release-status">Cover: ${artworkUrl ? "set" : "default"}</div><div class="form-actions"><button class="primary">Save album</button><button type="button" class="secondary" id="clear-release-image">Remove cover</button><button type="button" class="danger-button" id="delete-release">Delete album</button></div></form>`);
   wireTrackSearch("edit-release");
   $("#edit-release-image").addEventListener("click", async () => { const value = await pickCatalogAsset("release-artwork", "Choose album cover"); if (value) { artworkUrl = value; $("#edit-release-status").textContent = "Cover: set"; } });
   $("#clear-release-image").addEventListener("click", () => { artworkUrl = null; $("#edit-release-status").textContent = "Cover: default"; });
@@ -336,6 +389,14 @@ async function editRelease(release) {
     try {
       await api(`/api/artists/releases/${encodeURIComponent(release.id)}`, { method: "PATCH", body: { artistId: form.get("artistId"), title: form.get("title"), type: form.get("type"), description: form.get("description") || null, releaseDate: form.get("releaseDate") || null, artworkUrl, songIds: form.getAll("songId") } });
       [state.artists, state.releases] = await Promise.all([api("/api/artists"), api("/api/artists/releases")]); closeModal(); toast("Album updated"); await openRelease(release.id);
+    } catch (error) { toast(error.message, "error"); }
+  });
+  $("#delete-release").addEventListener("click", async () => {
+    if (!confirm(`Delete the album ${release.title}? Its songs will remain in F4WE.`)) return;
+    try {
+      await api(`/api/artists/releases/${encodeURIComponent(release.id)}`, { method: "DELETE" });
+      [state.artists, state.releases] = await Promise.all([api("/api/artists"), api("/api/artists/releases")]);
+      state.openRelease = null; closeModal(); toast("Album deleted"); navigate("albums");
     } catch (error) { toast(error.message, "error"); }
   });
 }
@@ -436,11 +497,11 @@ async function renderActivity(tab = "notifications") {
     } else if (tab === "updates") {
       const updates = await api("/api/profile/updates"); body = updates.map(item => `<div class="notification-item"><div><strong>${safe(item.developer?.username || "F4WE Team")}</strong><p>${safe(item.content)}</p></div><time>${new Date(item.postedDate).toLocaleDateString()}</time></div>`).join("") || '<div class="empty-state">No updates yet.</div>';
     } else if (tab === "requests") {
-      const requests = await api("/api/profile/requests"); body = `<form id="music-request-form" class="surface"><h3>Request music</h3><label class="field">YouTube or Spotify track URL<input name="sourceUrl" type="url" required></label><div class="form-actions"><button class="primary">Send request</button></div></form>${requests.map(item => `<div class="request-item"><div><strong>${safe(item.requestedTitle || item.songsRequested || "Music request")}</strong><p>${safe(item.status)}${item.rejectionReason ? ` · ${safe(item.rejectionReason)}` : ""}</p></div><time>${new Date(item.requestDate).toLocaleDateString()}</time></div>`).join("")}`;
+      const requests = await api("/api/profile/requests"); body = `<form id="music-request-form" class="surface"><h3>Request music</h3><label class="field">YouTube or Spotify track URL<input name="sourceUrl" type="url" required></label><div class="form-actions"><button class="primary">Send request</button></div></form>${requests.map(item => `<div class="request-item"><div><strong>${safe(item.requestedTitle || item.songsRequested || "Music request")}</strong><p>${safe(item.status)}${item.rejectionReason ? ` · ${safe(item.rejectionReason)}` : ""}</p></div><time>${new Date(item.requestDate).toLocaleDateString()}</time><button class="text-button" data-delete-request="${safe(item.id)}">Delete</button></div>`).join("")}`;
     } else if (tab === "bugs") {
-      const bugs = await api("/api/profile/bugs"); body = `<form id="bug-form" class="surface"><h3>Report a bug</h3><label class="field">What happened?<textarea name="description" minlength="5" required></textarea></label><div class="form-actions"><button class="primary">Send report</button></div></form>${bugs.map(item => `<div class="request-item"><div><strong>${safe(item.description)}</strong><p>${safe(item.status)}${item.adminResponse ? ` · ${safe(item.adminResponse)}` : ""}</p></div></div>`).join("")}`;
+      const bugs = await api("/api/profile/bugs"); body = `<form id="bug-form" class="surface"><h3>Report a bug</h3><label class="field">What happened?<textarea name="description" minlength="10" required></textarea></label><div class="form-actions"><button class="primary">Send report</button></div></form>${bugs.map(item => `<div class="request-item"><div><strong>${safe(item.description)}</strong><p>${safe(item.status)}${item.adminResponse ? ` · ${safe(item.adminResponse)}` : ""}</p></div><button class="text-button" data-delete-bug="${safe(item.id)}">Delete</button></div>`).join("")}`;
     } else {
-      const ideas = await api("/api/profile/update-ideas"); body = `<form id="idea-form" class="surface"><h3>Share an update idea</h3><label class="field">Your idea<textarea name="content" minlength="3" required></textarea></label><div class="form-actions"><button class="primary">Send idea</button></div></form>${ideas.map(item => `<div class="request-item"><div><strong>${safe(item.content)}</strong><p>${safe(item.user?.username || "F4WE user")}</p></div></div>`).join("")}`;
+      const ideas = await api("/api/profile/update-ideas"); body = `<form id="idea-form" class="surface"><h3>Share an update idea</h3><label class="field">Your idea<textarea name="content" minlength="5" required></textarea></label><div class="form-actions"><button class="primary">Send idea</button></div></form>${ideas.map(item => `<div class="request-item"><div><strong>${safe(item.content)}</strong><p>${safe(item.user?.username || "F4WE user")}</p></div><button class="text-button" data-delete-idea="${safe(item.id)}">Delete</button></div>`).join("")}`;
     }
   } catch (error) { body = `<div class="empty-state"><strong>Could not load activity</strong><p>${safe(error.message)}</p></div>`; }
   $("#view").innerHTML = `<div class="page-head"><div><p class="section-kicker">F4WE CENTER</p><h1>Activity</h1><p>Notifications, updates and your requests.</p></div></div><div class="tabs">${[["notifications","Notifications"],["updates","Updates"],["requests","Music requests"],["bugs","Bug reports"],["ideas","Ideas"]].map(([id,label]) => `<button class="${tab === id ? "active" : ""}" data-activity-tab="${id}">${label}</button>`).join("")}</div>${body}`;
@@ -608,7 +669,8 @@ async function renderOwnerSettings() {
   $("#settings-panel").innerHTML = '<div class="surface skeleton" style="height:300px"></div>';
   try {
     const [system, stats, shop] = await Promise.all([api("/api/system/status"), api("/api/developer/staff-stats"), api("/api/shop?manage=true")]);
-    $("#settings-panel").innerHTML = `<section class="settings-section"><h2>Application control</h2><p>Require updates or temporarily place F4WE into maintenance mode.</p><form id="system-form"><div class="form-grid"><label class="field">Minimum version<input name="minimumVersion" value="${safe(system.minimumVersion)}" required></label><label class="field full">Update message<textarea name="updateMessage">${safe(system.updateMessage)}</textarea></label><label class="field full">Maintenance message<textarea name="maintenanceMessage">${safe(system.maintenanceMessage)}</textarea></label></div><div class="toggle-row"><div><strong>Maintenance break</strong><p>Blocks non-owner app usage until switched off.</p></div><button type="button" class="toggle ${system.maintenanceEnabled ? "on" : ""}" id="maintenance-toggle"></button></div><label class="check-song"><input type="checkbox" name="announceUpdate"> Send an update notification to users</label><div class="form-actions"><button class="primary">Save system settings</button></div></form></section>
+    $("#settings-panel").innerHTML = `<section class="settings-section"><h2>Application control</h2><p>Require updates or temporarily place selected F4WE platforms into maintenance mode.</p><form id="system-form"><div class="form-grid"><label class="field">Minimum version<input name="minimumVersion" value="${safe(system.minimumVersion)}" required></label><label class="field full">Update message<textarea name="updateMessage">${safe(system.updateMessage)}</textarea></label><label class="field full">Maintenance message<textarea name="maintenanceMessage">${safe(system.maintenanceMessage)}</textarea></label></div><div class="toggle-row"><div><strong>Maintenance break</strong><p>Only blocks the platforms selected below.</p></div><button type="button" class="toggle ${system.maintenanceEnabled ? "on" : ""}" id="maintenance-toggle"></button></div><div class="platform-options"><label class="check-song"><input type="checkbox" name="maintenanceAndroid" ${system.maintenancePlatforms?.android !== false ? "checked" : ""}> Android</label><label class="check-song"><input type="checkbox" name="maintenanceWindows" ${system.maintenancePlatforms?.windows !== false ? "checked" : ""}> Windows 10/11</label></div><label class="check-song"><input type="checkbox" name="announceUpdate"> Send an update notification to users</label><div class="form-actions"><button class="primary">Save system settings</button></div></form></section>
+      <section class="settings-section"><h2>Notification Send</h2><p>Send a one-time message that appears when users enter F4WE.</p><form id="owner-announcement-form"><div class="form-grid"><label class="field full">Title<input name="title" maxlength="120" required></label><label class="field full">Message<textarea name="body" maxlength="2000" required></textarea></label></div><div class="platform-options"><label class="check-song"><input type="checkbox" name="android" checked> Android</label><label class="check-song"><input type="checkbox" name="windows" checked> Windows 10/11</label></div><div class="form-actions"><button class="primary">Send notification</button></div></form></section>
       <section class="settings-section"><h2>F4WE COIN manager</h2><form id="coin-owner-form"><div class="form-grid"><label class="field">User ID<input name="userId" pattern="\\d{1,16}" required></label><label class="field">Amount (negative removes)<input name="amount" type="number" step="1" required></label></div><div class="form-actions"><button class="primary">Update balance</button></div></form></section>
       <section class="settings-section"><h2>Reward settings</h2><form id="reward-owner-form"><div class="form-grid"><label class="field">Minutes per reward<input name="intervalMinutes" type="number" min="1" value="${Math.round(shop.rewardSettings.intervalSeconds / 60)}" required></label><label class="field">Coins per reward<input name="coinAmount" type="number" min="1" value="${shop.rewardSettings.coinAmount}" required></label></div><div class="form-actions"><button class="primary">Save reward settings</button></div></form></section>
       <section class="settings-section"><h2>Shop products</h2><p>Change prices or temporarily disable the three built-in products.</p>${shop.products.map(product => `<div class="toggle-row"><div><strong>${safe(product.name)}</strong><p>${safe(product.description)}</p></div><div class="mini-actions"><input class="inline-input" id="product-price-${safe(product.key)}" type="number" min="0" value="${product.price}" style="width:95px;margin:0"><button data-owner-product="${safe(product.key)}" data-product-active="${product.active}">${product.active ? "Save / disable" : "Save / enable"}</button></div></div>`).join("")}</section>
@@ -617,7 +679,8 @@ async function renderOwnerSettings() {
       <section class="settings-section"><h2>Staff statistics</h2>${stats.map(item => `<div class="friend-card"><div class="friend-avatar"><img src="${image(item.profilePicture)}"></div><div><strong>${safe(item.username)}</strong><p>${safe(userRank(item))}</p></div><span class="status-chip">${item.uploadedCount} uploads</span></div>`).join("")}</section>`;
     let maintenance = system.maintenanceEnabled;
     $("#maintenance-toggle").addEventListener("click", event => { maintenance = !maintenance; event.currentTarget.classList.toggle("on", maintenance); });
-    $("#system-form").addEventListener("submit", async event => { event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget)); try { await api("/api/system/status", { method: "PATCH", body: { minimumVersion: values.minimumVersion, updateMessage: values.updateMessage, maintenanceMessage: values.maintenanceMessage, maintenanceEnabled: maintenance, announceUpdate: values.announceUpdate === "on" } }); toast("System settings updated"); } catch (error) { toast(error.message, "error"); } });
+    $("#system-form").addEventListener("submit", async event => { event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget)); try { await api("/api/system/status", { method: "PATCH", body: { minimumVersion: values.minimumVersion, updateMessage: values.updateMessage, maintenanceMessage: values.maintenanceMessage, maintenanceEnabled: maintenance, maintenancePlatforms: { android: values.maintenanceAndroid === "on", windows: values.maintenanceWindows === "on" }, announceUpdate: values.announceUpdate === "on" } }); toast("System settings updated"); } catch (error) { toast(error.message, "error"); } });
+    $("#owner-announcement-form").addEventListener("submit", async event => { event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget)); const platforms = [values.android === "on" ? "android" : null, values.windows === "on" ? "windows" : null].filter(Boolean); if (!platforms.length) return toast("Select Android, Windows 10/11, or both", "error"); try { await api("/api/system/announcements", { method: "POST", body: { title: values.title, body: values.body, platforms } }); event.currentTarget.reset(); toast("Notification sent"); } catch (error) { toast(error.message, "error"); } });
     $("#coin-owner-form").addEventListener("submit", async event => { event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget)); try { const result = await api("/api/shop/owner/coins", { method: "POST", body: { userId: values.userId, amount: Number(values.amount) } }); toast(`${result.username}: ${result.coins} F4WE COIN`); } catch (error) { toast(error.message, "error"); } });
     $("#reward-owner-form").addEventListener("submit", async event => { event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget)); try { await api("/api/shop/owner/reward-settings", { method: "PATCH", body: { intervalMinutes: Number(values.intervalMinutes), coinAmount: Number(values.coinAmount) } }); toast("Reward settings saved"); } catch (error) { toast(error.message, "error"); } });
     $("#design-owner-form").addEventListener("submit", async event => { event.preventDefault(); const values = Object.fromEntries(new FormData(event.currentTarget)); const result = await window.f4we.pickAndUpload({ accept: "image", title: "Choose profile design", startPath: "/api/shop/owner/designs/upload-url", completePath: "/api/shop/owner/designs/complete", completePayload: { name: values.name, price: Number(values.price), isLimited: values.isLimited === "on" } }); if (result.canceled) return; if (!result.ok) return toast(uploadError(result, "Design upload failed"), "error"); toast("Profile design added"); renderOwnerSettings(); });
@@ -832,6 +895,9 @@ document.addEventListener("click", async event => {
   const user = target.closest("[data-open-user]"); if (user) return void openPublicProfile(user.dataset.openUser);
   const move = target.closest("[data-move-song]"); if (move) { event.stopPropagation(); return void movePlaylistSong(move.dataset.moveSong, move.dataset.direction); }
   const deleteNotification = target.closest("[data-delete-notification]"); if (deleteNotification) { await api(`/api/profile/notifications/${deleteNotification.dataset.deleteNotification}`, { method: "DELETE" }); return void renderActivity(); }
+  const deleteRequest = target.closest("[data-delete-request]"); if (deleteRequest) { if (confirm("Delete this music request?")) { await api(`/api/profile/requests/${deleteRequest.dataset.deleteRequest}`, { method: "DELETE" }); return void renderActivity("requests"); } return; }
+  const deleteBug = target.closest("[data-delete-bug]"); if (deleteBug) { if (confirm("Delete this bug report?")) { await api(`/api/profile/bugs/${deleteBug.dataset.deleteBug}`, { method: "DELETE" }); return void renderActivity("bugs"); } return; }
+  const deleteIdea = target.closest("[data-delete-idea]"); if (deleteIdea) { if (confirm("Delete this update idea?")) { await api(`/api/profile/update-ideas/${deleteIdea.dataset.deleteIdea}`, { method: "DELETE" }); return void renderActivity("ideas"); } return; }
   const buyProductButton = target.closest("[data-buy-product]"); if (buyProductButton) return void buyProduct(buyProductButton.dataset.buyProduct);
   const buyDesign = target.closest("[data-buy-design]"); if (buyDesign) return void useOrBuyDesign(buyDesign.dataset.buyDesign, true);
   const useDesign = target.closest("[data-use-design]"); if (useDesign) return void useOrBuyDesign(useDesign.dataset.useDesign, false);

@@ -66,6 +66,8 @@ model User {
   pushTokens              PushToken[]
   createdCatalogArtists   CatalogArtist[]       @relation("CatalogArtistCreator")
   createdCatalogReleases  CatalogRelease[]      @relation("CatalogReleaseCreator")
+  createdOwnerAnnouncements OwnerAnnouncement[] @relation("OwnerAnnouncementCreator")
+  announcementDismissals  OwnerAnnouncementDismissal[]
 }
 
 model AccessKey {
@@ -301,6 +303,30 @@ model Notification {
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model OwnerAnnouncement {
+  id          String                         @id @default(cuid())
+  title       String
+  body        String
+  platforms   String[]
+  createdById String                         @db.VarChar(32)
+  createdAt   DateTime                       @default(now())
+  createdBy   User                           @relation("OwnerAnnouncementCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  dismissals  OwnerAnnouncementDismissal[]
+
+  @@index([createdAt])
+}
+
+model OwnerAnnouncementDismissal {
+  announcementId String
+  userId          String            @db.VarChar(32)
+  dismissedAt     DateTime          @default(now())
+  announcement    OwnerAnnouncement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([announcementId, userId])
+  @@index([userId, dismissedAt])
 }
 
 model PushToken {

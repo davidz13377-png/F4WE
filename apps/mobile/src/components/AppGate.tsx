@@ -6,7 +6,7 @@ import { API_URL } from "../lib/api";
 import { colors } from "../lib/theme";
 import { useAuth } from "../context/AuthContext";
 
-export type AppStatus = { minimumVersion: string; updateMessage: string; maintenanceEnabled: boolean; maintenanceMessage: string; downloadUrl: string };
+export type AppStatus = { minimumVersion: string; updateMessage: string; maintenanceEnabled: boolean; maintenanceApplies: boolean; maintenancePlatforms: { android: boolean; windows: boolean }; maintenanceMessage: string; downloadUrl: string };
 
 function olderThan(current: string, minimum: string) {
   const parse = (value: string) => value.split(/[.+-]/).slice(0, 3).map(part => Number(part) || 0);
@@ -16,17 +16,17 @@ function olderThan(current: string, minimum: string) {
 }
 
 export function AppGate() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [status, setStatus] = useState<AppStatus | null>(null);
   const load = useCallback(() => {
-    void fetch(`${API_URL}/api/system/status`, { cache: "no-store" }).then(response => response.ok ? response.json() : null).then(setStatus).catch(() => undefined);
+    void fetch(`${API_URL}/api/system/status`, { cache: "no-store", headers: { "X-F4WE-Platform": "android" } }).then(response => response.ok ? response.json() : null).then(setStatus).catch(() => undefined);
   }, []);
   useEffect(() => { load(); const timer = setInterval(load, 15_000); return () => clearInterval(timer); }, [load]);
   const currentVersion = Constants.expoConfig?.version || "0.0.0";
   const updateRequired = !!status && olderThan(currentVersion, status.minimumVersion);
   // Logged-out users may reach Login so an Owner cannot lock themselves out.
   // After authentication every non-Owner is blocked by this gate and the API.
-  const maintenance = !!status?.maintenanceEnabled && !!user && !user.isOwner;
+  const maintenance = !!status?.maintenanceApplies && !!token && !user?.isOwner;
   if (!status || (!updateRequired && !maintenance)) return null;
   return <Modal visible transparent animationType="fade" onRequestClose={() => undefined} statusBarTranslucent>
     <View style={styles.backdrop}><View style={styles.card}><View style={styles.icon}><Ionicons name={updateRequired ? "cloud-download-outline" : "construct-outline"} size={34} color={colors.softRed} /></View>

@@ -24,7 +24,7 @@ assert.match(routes, /router\.get\("\/releases"/);
 assert.match(app, /app\.use\("\/api\/artists", artistRoutes\)/);
 assert.match(storage, /"artist" \| "release-artwork"/);
 
-assert.equal(desktopPackage.version, "1.4.0");
+assert.equal(desktopPackage.version, "1.5.0");
 assert.equal(desktopPackage.build.appId, "com.musicbox.desktop");
 assert.deepEqual(desktopPackage.build.win.target.map(item => item.target), ["nsis", "portable"]);
 assert.match(main, /protocol\.handle\("f4we-media"/);

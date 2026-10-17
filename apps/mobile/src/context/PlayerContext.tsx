@@ -43,7 +43,8 @@ function streamTrack(song: Song, token: string): Track {
     contentType: "audio/mpeg",
     headers: {
       Authorization: `Bearer ${token}`,
-      "X-F4WE-Version": APP_VERSION
+      "X-F4WE-Version": APP_VERSION,
+      "X-F4WE-Platform": "android"
     }
   };
 }
